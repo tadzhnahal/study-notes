@@ -1,0 +1,10 @@
+groups:
+  - name: url-probe
+    rules:
+      - alert: UrlDown
+        expr: probe_success == 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "URL недоступен больше минуты"

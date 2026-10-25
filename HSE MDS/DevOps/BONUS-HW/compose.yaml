@@ -1,0 +1,34 @@
+services:
+  url-probe:
+    build: ./url-probe
+    environment:
+      PROBE_TIMEOUT: "2"
+      PROBE_OUTPUT_DIR: /textfile
+    volumes:
+      - ./url-probe:/config:ro,Z
+      - textfile:/textfile
+    command: /bin/sh -c "chown probe:probe /textfile && exec crond -f -d 8"
+    restart: unless-stopped
+
+  node-exporter:
+    image: prom/node-exporter:v1.9.1
+    command:
+      - --collector.textfile.directory=/textfile
+    volumes:
+      - textfile:/textfile:ro
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    volumes:
+      - ./prometheus:/etc/prometheus:ro,Z
+    ports:
+      - "127.0.0.1:9091:9090"
+    restart: unless-stopped
+
+  test-site:
+    image: nginx:alpine
+    restart: unless-stopped
+
+volumes:
+  textfile:

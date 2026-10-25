@@ -1,0 +1,7 @@
+# Один URL на строку. Пустые строки и строки с # пропускаются.
+https://example.com
+https://example.com/no-such-page
+http://no-such-host.invalid
+http://10.255.255.1
+https://example.org
+http://test-site
