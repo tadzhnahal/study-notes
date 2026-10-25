@@ -1,0 +1,14 @@
+[Unit]
+Description=Prometheus PostgreSQL Exporter
+After=network.target postgresql-custom.service
+Requires=postgresql-custom.service
+
+[Service]
+Type=simple
+User={{ postgres__exporter_user }}
+Environment="DATA_SOURCE_NAME=user={{ postgres__exporter_user }} host=/var/run/postgresql dbname=postgres sslmode=disable"
+ExecStart=/usr/local/bin/postgres_exporter --web.listen-address=127.0.0.1:9187
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

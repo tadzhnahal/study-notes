@@ -1,0 +1,15 @@
+[Unit]
+Description=PostgreSQL custom cluster
+After=network.target
+
+[Service]
+Type=forking
+User=postgres
+Group=postgres
+PIDFile={{ postgres__data_dir }}/postmaster.pid
+ExecStart=/usr/lib/postgresql/{{ postgres__version }}/bin/pg_ctl start -D {{ postgres__data_dir }} -w
+ExecStop=/usr/lib/postgresql/{{ postgres__version }}/bin/pg_ctl stop -D {{ postgres__data_dir }} -m fast -w
+ExecReload=/usr/lib/postgresql/{{ postgres__version }}/bin/pg_ctl reload -D {{ postgres__data_dir }}
+
+[Install]
+WantedBy=multi-user.target

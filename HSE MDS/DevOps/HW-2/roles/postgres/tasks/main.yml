@@ -1,0 +1,174 @@
+---
+- name: Install PostgreSQL common tools
+  ansible.builtin.apt:
+    name:
+      - postgresql-common
+      - acl
+      - python3-psycopg2
+    state: present
+    update_cache: true
+
+- name: Disable automatic PostgreSQL cluster creation
+  ansible.builtin.lineinfile:
+    path: /etc/postgresql-common/createcluster.conf
+    regexp: '^\s*#?\s*create_main_cluster\s*='
+    line: 'create_main_cluster = false'
+
+- name: Install PostgreSQL
+  ansible.builtin.apt:
+    name: postgresql
+    state: present
+
+- name: Create /data directory
+  ansible.builtin.file:
+    path: /data
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Create PostgreSQL parent directory
+  ansible.builtin.file:
+    path: /data/postgres
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: '0700'
+
+- name: Create PostgreSQL data directory
+  ansible.builtin.file:
+    path: "{{ postgres__data_dir }}"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: '0700'
+
+- name: Initialize PostgreSQL cluster
+  ansible.builtin.command:
+    cmd: "/usr/lib/postgresql/{{ postgres__version }}/bin/pg_ctl initdb -D {{ postgres__data_dir }}"
+    creates: "{{ postgres__data_dir }}/PG_VERSION"
+  become: true
+  become_user: postgres
+
+- name: Install PostgreSQL systemd service
+  ansible.builtin.template:
+    src: postgresql-custom.service.j2
+    dest: /etc/systemd/system/postgresql-custom.service
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Start PostgreSQL service
+  ansible.builtin.systemd_service:
+    name: postgresql-custom
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Configure PostgreSQL settings
+  ansible.builtin.lineinfile:
+    path: "{{ postgres__data_dir }}/postgresql.conf"
+    regexp: '^\s*#?\s*{{ item.key }}\s*='
+    line: "{{ item.key }} = {{ item.value }}"
+  loop: "{{ postgres__config | dict2items }}"
+  notify: Restart PostgreSQL
+
+- name: Configure PostgreSQL access rules
+  ansible.builtin.template:
+    src: pg_hba.conf.j2
+    dest: "{{ postgres__data_dir }}/pg_hba.conf"
+    owner: postgres
+    group: postgres
+    mode: '0600'
+  notify: Reload PostgreSQL
+
+- name: Check PostgreSQL connection
+  ansible.builtin.command:
+    cmd: 'psql -tAc "select 1"'
+  become: true
+  become_user: postgres
+  changed_when: false
+
+- name: Create PostgreSQL users
+  community.postgresql.postgresql_user:
+    name: "{{ item.name }}"
+    password: "{{ item.password }}"
+    state: present
+  loop: "{{ postgres__users }}"
+  become: true
+  become_user: postgres
+  no_log: true
+
+- name: Create PostgreSQL databases
+  community.postgresql.postgresql_db:
+    name: "{{ item.name }}"
+    state: present
+  loop: "{{ postgres__databases }}"
+  become: true
+  become_user: postgres
+
+- name: Create exporter system user
+  ansible.builtin.user:
+    name: "{{ postgres__exporter_user }}"
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+    state: present
+
+- name: Create exporter PostgreSQL user
+  community.postgresql.postgresql_user:
+    name: "{{ postgres__exporter_user }}"
+    state: present
+  become: true
+  become_user: postgres
+
+- name: Grant monitoring permissions to exporter
+  community.postgresql.postgresql_membership:
+    group: pg_monitor
+    target_roles:
+      - "{{ postgres__exporter_user }}"
+    state: present
+  become: true
+  become_user: postgres
+
+- name: Download postgres-exporter
+  ansible.builtin.get_url:
+    url: "https://github.com/prometheus-community/postgres_exporter/releases/download/v{{ postgres__exporter_version }}/postgres_exporter-{{ postgres__exporter_version }}.linux-amd64.tar.gz"
+    dest: "/tmp/postgres_exporter-{{ postgres__exporter_version }}.linux-amd64.tar.gz"
+    mode: '0644'
+  delegate_to: localhost
+  become: false
+
+- name: Extract postgres-exporter
+  ansible.builtin.unarchive:
+    src: "/tmp/postgres_exporter-{{ postgres__exporter_version }}.linux-amd64.tar.gz"
+    dest: /tmp
+    remote_src: true
+    creates: "/tmp/postgres_exporter-{{ postgres__exporter_version }}.linux-amd64/postgres_exporter"
+  delegate_to: localhost
+  become: false
+
+- name: Install postgres-exporter binary
+  ansible.builtin.copy:
+    src: "/tmp/postgres_exporter-{{ postgres__exporter_version }}.linux-amd64/postgres_exporter"
+    dest: /usr/local/bin/postgres_exporter
+    owner: root
+    group: root
+    mode: '0755'
+  notify: Restart postgres-exporter
+
+- name: Install postgres-exporter service
+  ansible.builtin.template:
+    src: postgres-exporter.service.j2
+    dest: /etc/systemd/system/postgres-exporter.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart postgres-exporter
+
+- name: Start postgres-exporter service
+  ansible.builtin.systemd_service:
+    name: postgres-exporter
+    state: started
+    enabled: true
+    daemon_reload: true

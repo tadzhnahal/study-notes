@@ -1,0 +1,105 @@
+tadzhnahal@pc ~$ script ~/hw2_terminal.log
+bash: script: команда не найдена...
+Установить пакет «util-linux-script», предоставляющий команду «script»? [N/y] y
+
+
+ * Ожидание в очереди...
+ * Загрузка списка пакетов....
+Следующие пакеты должны быть установлены:
+ util-linux-script_2.41.5-1.fc43.x86_64  Utilities for creating and replaying typescripts of terminal session
+Продолжить с этими изменениями? [N/y] y
+
+
+ * Ожидание в очереди...
+ * Ожидание аутентификации...
+ * Ожидание в очереди...
+ * Загрузка пакетов...
+ * Запрос данных...
+ * Проверка изменений...
+ * Установка пакетов...
+Script started, output log file is '/home/tadzhnahal/hw2_terminal.log'.
+tadzhnahal@pc ~$ cat /etc/os-release
+NAME="Fedora Linux"
+VERSION="43 (Workstation Edition)"
+RELEASE_TYPE=stable
+ID=fedora
+VERSION_ID=43
+VERSION_CODENAME=""
+PRETTY_NAME="Fedora Linux 43 (Workstation Edition)"
+ANSI_COLOR="0;38;2;60;110;180"
+LOGO=fedora-logo-icon
+CPE_NAME="cpe:/o:fedoraproject:fedora:43"
+DEFAULT_HOSTNAME="fedora"
+HOME_URL="https://fedoraproject.org/"
+DOCUMENTATION_URL="https://docs.fedoraproject.org/en-US/fedora/f43/"
+SUPPORT_URL="https://ask.fedoraproject.org/"
+BUG_REPORT_URL="https://bugzilla.redhat.com/"
+REDHAT_BUGZILLA_PRODUCT="Fedora"
+REDHAT_BUGZILLA_PRODUCT_VERSION=43
+REDHAT_SUPPORT_PRODUCT="Fedora"
+REDHAT_SUPPORT_PRODUCT_VERSION=43
+SUPPORT_END=2026-12-02
+VARIANT="Workstation Edition"
+VARIANT_ID=workstation
+tadzhnahal@pc ~$ ansible --version
+ansible [core 2.18.18rc1]
+  config file = /etc/ansible/ansible.cfg
+  configured module search path = ['/home/tadzhnahal/.ansible/plugins/modules', '/usr/share/ansible/plugins/modules']
+  ansible python module location = /usr/lib/python3.14/site-packages/ansible
+  ansible collection location = /home/tadzhnahal/.ansible/collections:/usr/share/ansible/collections
+  executable location = /usr/bin/ansible
+  python version = 3.14.7 (main, Aug 10 2026, 00:00:00) [GCC 15.3.1 20260722 (Red Hat 15.3.1-1)] (/usr/bin/python3)
+  jinja version = 3.1.6
+  libyaml = True
+tadzhnahal@pc ~$ rpm -q virt-manager qemu-kvm libvirt-daemon-kvm
+virt-manager-5.1.0-3.fc43.noarch
+qemu-kvm-10.1.5-1.fc43.x86_64
+libvirt-daemon-kvm-11.6.0-3.fc43.x86_64
+tadzhnahal@pc ~$ sudo virsh -c qemu:///system list --all
+[sudo] пароль для tadzhnahal:
+error: не удалось подключиться к гипервизору
+error: Не удалось подключить сокет к «/var/run/libvirt/virtqemud-sock»: Нет такого файла или каталога
+tadzhnahal@pc ~$ sudo systemctl enable --now virtqemud.socket
+tadzhnahal@pc ~$ sudo virsh -c qemu:///system list --all
+ ID   Имя   Состояние
+-----------------------
+
+tadzhnahal@pc ~$ virt-manager
+tadzhnahal@pc ~$ curl -fL -o ~/ubuntu-24.04.5-live-server-amd64.iso https://releases.ubuntu.com/24.04/ubuntu-24.04.5-live-server-amd64.iso
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100 3891M  100 3891M    0     0  2207k      0  0:30:05  0:30:05 --:--:-- 2317k
+tadzhnahal@pc ~$ sha256sum ~/ubuntu-24.04.5-live-server-amd64.iso
+97f3d7ffb032c3eb3b23d2c8be9cc76e60c2c1f2c0146ba5ba9fe01cafae0fd8  /home/tadzhnahal/ubuntu-24.04.5-live-server-amd64.iso
+tadzhnahal@pc ~$ virt-manager
+tadzhnahal@pc ~$ sudo systemctl enable --now virtstoraged.socket
+[sudo] пароль для tadzhnahal:
+tadzhnahal@pc ~$ virt-manager
+tadzhnahal@pc ~$ sudo virsh -c qemu:///system net-list --all
+error: Не удалось получить список сетей
+error: Не удалось подключить сокет к «/var/run/libvirt/virtnetworkd-sock»: Нет такого файла или каталога
+
+tadzhnahal@pc ~$ sudo systemctl enable --now virtnetworkd.socket
+tadzhnahal@pc ~$ sudo virsh -c qemu:///system net-list --all
+ Имя       Состояние   Автозапуск   Постоянный
+------------------------------------------------
+ default   активен     yes          yes
+
+tadzhnahal@pc ~$ virt-manager
+libva info: VA-API version 1.22.0
+libva info: Trying to open /usr/lib64/dri-nonfree/iHD_drv_video.so
+libva info: Trying to open /usr/lib64/dri-freeworld/iHD_drv_video.so
+libva info: Trying to open /usr/lib64/dri/iHD_drv_video.so
+libva info: Found init function __vaDriverInit_1_22
+libva info: va_openDriver() returns 0
+libva info: VA-API version 1.22.0
+libva info: Trying to open /usr/lib64/dri-nonfree/iHD_drv_video.so
+libva info: Trying to open /usr/lib64/dri-freeworld/iHD_drv_video.so
+libva info: Trying to open /usr/lib64/dri/iHD_drv_video.so
+libva info: Found init function __vaDriverInit_1_22
+libva info: va_openDriver() returns 0
+
+(virt-manager:354787): GSpice-WARNING **: 09:41:48.969: Warning no automount-inhibiting implementation available
+
+
+(virt-manager:354787): GSpice-WARNING **: 10:19:06.906: Warning no automount-inhibiting implementation available

@@ -1,0 +1,1506 @@
+
+- name: Install PostgreSQL
+  ansible.builtin.apt:
+    name: postgresql
+    state: present
+
+- name: Create PostgreSQL data directory
+  ansible.builtin.file:
+    path: "{{ postgres__data_dir }}"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: '0700'
+
+- name: Initialize PostgreSQL cluster
+  ansible.builtin.command:
+    cmd: "/usr/lib/postgresql/{{ postgres__version }}/bin/pg_ctl initdb -D {{ postgres__data_dir }}"
+    creates: "{{ postgres__data_dir }}/PG_VERSION"
+  become: true
+  become_user: postgres
+
+- name: Install PostgreSQL systemd service
+  ansible.builtin.template:
+    src: postgresql-custom.service.j2
+    dest: /etc/systemd/system/postgresql-custom.service
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Start PostgreSQL service
+  ansible.builtin.systemd_service:
+    name: postgresql-custom
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Configure PostgreSQL settings
+  ansible.builtin.lineinfile:
+    path: "{{ postgres__data_dir }}/postgresql.conf"
+    regexp: '^\s*#?\s*{{ item.key }}\s*='
+    line: "{{ item.key }} = {{ item.value }}"
+  loop: "{{ postgres__config | dict2items }}"
+  notify: Restart PostgreSQL
+tadzhnahal@pc ~/projects/ansible$ ansible-playbook -i inventories/main/hosts.yaml playbook.yml
+
+PLAY [Configure PostgreSQL] *****************************************************************************************************************************************
+
+TASK [Gathering Facts] **********************************************************************************************************************************************
+[WARNING]: Platform linux on host vm1 is using the discovered Python interpreter at /usr/bin/python3.12, but future installation of another Python interpreter could
+change the meaning of that path. See https://docs.ansible.com/ansible-core/2.18/reference_appendices/interpreter_discovery.html for more information.
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL common tools] *******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Disable automatic PostgreSQL cluster creation] *****************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL] ********************************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL data directory] ******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Initialize PostgreSQL cluster] *********************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL systemd service] ****************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Start PostgreSQL service] **************************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Configure PostgreSQL settings] *********************************************************************************************************************
+changed: [vm1] => (item={'key': 'max_connections', 'value': 100})
+changed: [vm1] => (item={'key': 'shared_buffers', 'value': '128MB'})
+changed: [vm1] => (item={'key': 'log_min_duration_statement', 'value': 1000})
+
+RUNNING HANDLER [postgres : Restart PostgreSQL] *********************************************************************************************************************
+changed: [vm1]
+
+PLAY RECAP **********************************************************************************************************************************************************
+vm1                        : ok=10   changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+
+tadzhnahal@pc ~/projects/ansible$ ansible -i inventories/main/hosts.yaml vm1 -b --become-user postgres -m command -a 'psql -c "show max_connections" -c "show shared_buffers" -c "show log_min_duration_statement"'
+[WARNING]: Platform linux on host vm1 is using the discovered Python interpreter at /usr/bin/python3.12, but future installation of another Python interpreter could
+change the meaning of that path. See https://docs.ansible.com/ansible-core/2.18/reference_appendices/interpreter_discovery.html for more information.
+vm1 | CHANGED | rc=0 >>
+ max_connections
+-----------------
+ 100
+(1 row)
+
+ shared_buffers
+----------------
+ 128MB
+(1 row)
+
+ log_min_duration_statement
+----------------------------
+ 1s
+(1 row)
+tadzhnahal@pc ~/projects/ansible$ nano roles/postgres/defaults/main.yml
+tadzhnahal@pc ~/projects/ansible$ cat roles/postgres/defaults/main.yml
+---
+postgres__version: 16
+postgres__data_dir: /data/postgres/data
+
+postgres__config:
+  max_connections: 100
+  shared_buffers: 128MB
+  log_min_duration_statement: 1000
+
+postgres__hba:
+  - type: local
+    database: all
+    user: all
+    method: peer
+
+  - type: host
+    database: all
+    user: all
+    address: 127.0.0.1/32
+    method: scram-sha-256
+
+  - type: host
+    database: all
+    user: all
+    address: "::1/128"
+    method: scram-sha-256
+tadzhnahal@pc ~/projects/ansible$ nano roles/postgres/templates/pg_hba.conf.j2
+tadzhnahal@pc ~/projects/ansible$ cat roles/postgres/templates/pg_hba.conf.j2
+{% for rule in postgres__hba %}
+{{ rule.type }}  {{ rule.database }}  {{ rule.user }}{% if rule.address is defined %}  {{ rule.address }}{% endif %}  {{ rule.method }}
+{% endfor %}
+tadzhnahal@pc ~/projects/ansible$ nano roles/postgres/handlers/main.yml
+tadzhnahal@pc ~/projects/ansible$ cat roles/postgres/handlers/main.yml
+---
+- name: Restart PostgreSQL
+  ansible.builtin.systemd_service:
+    name: postgresql-custom
+    state: restarted
+
+- name: Reload PostgreSQL
+  ansible.builtin.systemd_service:
+    name: postgresql-custom
+    state: reloaded
+tadzhnahal@pc ~/projects/ansible$ nano roles/postgres/tasks/main.yml
+tadzhnahal@pc ~/projects/ansible$ cat roles/postgres/tasks/main.yml
+---
+- name: Install PostgreSQL common tools
+  ansible.builtin.apt:
+    name:
+      - postgresql-common
+      - acl
+    state: present
+    update_cache: true
+
+- name: Disable automatic PostgreSQL cluster creation
+  ansible.builtin.lineinfile:
+    path: /etc/postgresql-common/createcluster.conf
+    regexp: '^#?\s*create_main_cluster\s*='
+    line: 'create_main_cluster = false'
+
+- name: Install PostgreSQL
+  ansible.builtin.apt:
+    name: postgresql
+    state: present
+
+- name: Create PostgreSQL data directory
+  ansible.builtin.file:
+    path: "{{ postgres__data_dir }}"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: '0700'
+
+- name: Initialize PostgreSQL cluster
+  ansible.builtin.command:
+    cmd: "/usr/lib/postgresql/{{ postgres__version }}/bin/pg_ctl initdb -D {{ postgres__data_dir }}"
+    creates: "{{ postgres__data_dir }}/PG_VERSION"
+  become: true
+  become_user: postgres
+
+- name: Install PostgreSQL systemd service
+  ansible.builtin.template:
+    src: postgresql-custom.service.j2
+    dest: /etc/systemd/system/postgresql-custom.service
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Start PostgreSQL service
+  ansible.builtin.systemd_service:
+    name: postgresql-custom
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Configure PostgreSQL settings
+  ansible.builtin.lineinfile:
+    path: "{{ postgres__data_dir }}/postgresql.conf"
+    regexp: '^\s*#?\s*{{ item.key }}\s*='
+    line: "{{ item.key }} = {{ item.value }}"
+  loop: "{{ postgres__config | dict2items }}"
+  notify: Restart PostgreSQL
+
+- name: Configure PostgreSQL access rules
+  ansible.builtin.template:
+    src: pg_hba.conf.j2
+    dest: "{{ postgres__data_dir }}/pg_hba.conf"
+    owner: postgres
+    group: postgres
+    mode: '0600'
+  notify: Reload PostgreSQL
+tadzhnahal@pc ~/projects/ansible$ ansible-playbook -i inventories/main/hosts.yaml playbook.yml
+
+PLAY [Configure PostgreSQL] *****************************************************************************************************************************************
+
+TASK [Gathering Facts] **********************************************************************************************************************************************
+[WARNING]: Platform linux on host vm1 is using the discovered Python interpreter at /usr/bin/python3.12, but future installation of another Python interpreter could
+change the meaning of that path. See https://docs.ansible.com/ansible-core/2.18/reference_appendices/interpreter_discovery.html for more information.
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL common tools] *******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Disable automatic PostgreSQL cluster creation] *****************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL] ********************************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL data directory] ******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Initialize PostgreSQL cluster] *********************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL systemd service] ****************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Start PostgreSQL service] **************************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Configure PostgreSQL settings] *********************************************************************************************************************
+ok: [vm1] => (item={'key': 'max_connections', 'value': 100})
+ok: [vm1] => (item={'key': 'shared_buffers', 'value': '128MB'})
+ok: [vm1] => (item={'key': 'log_min_duration_statement', 'value': 1000})
+
+TASK [postgres : Configure PostgreSQL access rules] *****************************************************************************************************************
+changed: [vm1]
+
+RUNNING HANDLER [postgres : Reload PostgreSQL] **********************************************************************************************************************
+changed: [vm1]
+
+PLAY RECAP **********************************************************************************************************************************************************
+vm1                        : ok=11   changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+
+tadzhnahal@pc ~/projects/ansible$ ansible -i inventories/main/hosts.yaml vm1 -b --become-user postgres -m command -a 'psql -c "select line_number, type, database, user_name, address, auth_method, error from pg_hba_file_rules order by line_number"'
+[WARNING]: Platform linux on host vm1 is using the discovered Python interpreter at /usr/bin/python3.12, but future installation of another Python interpreter could
+change the meaning of that path. See https://docs.ansible.com/ansible-core/2.18/reference_appendices/interpreter_discovery.html for more information.
+vm1 | CHANGED | rc=0 >>
+ line_number | type  | database | user_name |  address  |  auth_method  | error
+-------------+-------+----------+-----------+-----------+---------------+-------
+           1 | local | {all}    | {all}     |           | peer          |
+           2 | host  | {all}    | {all}     | 127.0.0.1 | scram-sha-256 |
+           3 | host  | {all}    | {all}     | ::1       | scram-sha-256 |
+(3 rows)
+tadzhnahal@pc ~/projects/ansible$ nano roles/postgres/defaults/main.yml
+tadzhnahal@pc ~/projects/ansible$ cat roles/postgres/defaults/main.yml
+---
+postgres__version: 16
+postgres__data_dir: /data/postgres/data
+
+postgres__config:
+  max_connections: 100
+  shared_buffers: 128MB
+  log_min_duration_statement: 1000
+
+postgres__hba:
+  - type: local
+    database: all
+    user: all
+    method: peer
+
+  - type: host
+    database: all
+    user: all
+    address: 127.0.0.1/32
+    method: scram-sha-256
+
+  - type: host
+    database: all
+    user: all
+    address: "::1/128"
+    method: scram-sha-256
+
+postgres__databases:
+  - name: app_db
+tadzhnahal@pc ~/projects/ansible$ nano roles/postgres/defaults/main.yml
+tadzhnahal@pc ~/projects/ansible$ cat roles/postgres/defaults/main.yml
+---
+postgres__version: 16
+postgres__data_dir: /data/postgres/data
+
+postgres__config:
+  max_connections: 100
+  shared_buffers: 128MB
+  log_min_duration_statement: 1000
+
+postgres__hba:
+  - type: local
+    database: all
+    user: all
+    method: peer
+
+  - type: host
+    database: all
+    user: all
+    address: 127.0.0.1/32
+    method: scram-sha-256
+
+  - type: host
+    database: all
+    user: all
+    address: "::1/128"
+    method: scram-sha-256
+
+postgres__databases:
+  - name: app_db
+
+postgres__users:
+  - name: app_user
+    password: "{{ vault_postgres_app_password }}"
+tadzhnahal@pc ~/projects/ansible$ mkdir -p inventories/main/group_vars/all
+tadzhnahal@pc ~/projects/ansible$ EDITOR=nano ansible-vault create inventories/main/group_vars/all/vault.yml
+New Vault password:
+Confirm New Vault password:
+tadzhnahal@pc ~/projects/ansible$ head -n 1 inventories/main/group_vars/all/vault.yml
+$ANSIBLE_VAULT;1.1;AES256
+tadzhnahal@pc ~/projects/ansible$ nano requirements.yml
+tadzhnahal@pc ~/projects/ansible$ cat requirements.yml
+---
+collections:
+  - name: community.postgresql
+tadzhnahal@pc ~/projects/ansible$ ansible-galaxy collection install -r requirements.yml
+Starting galaxy collection install process
+Process install dependency map
+Starting collection install process
+Downloading https://galaxy.ansible.com/api/v3/plugin/ansible/content/published/collections/artifacts/community-postgresql-5.1.0.tar.gz to /home/tadzhnahal/.ansible/tmp/ansible-local-96893691e3tu04/tmpxmh95u_0/community-postgresql-5.1.0-9yo1pfee
+Installing 'community.postgresql:5.1.0' to '/home/tadzhnahal/.ansible/collections/ansible_collections/community/postgresql'
+community.postgresql:5.1.0 was installed successfully
+tadzhnahal@pc ~/projects/ansible$ nano roles/postgres/tasks/main.yml
+tadzhnahal@pc ~/projects/ansible$ cat roles/postgres/tasks/main.yml
+---
+- name: Install PostgreSQL common tools
+  ansible.builtin.apt:
+    name:
+      - postgresql-common
+      - acl
+      - python3-psycopg2
+    state: present
+    update_cache: true
+
+- name: Disable automatic PostgreSQL cluster creation
+  ansible.builtin.lineinfile:
+    path: /etc/postgresql-common/createcluster.conf
+    regexp: '^#?\s*create_main_cluster\s*='
+    line: 'create_main_cluster = false'
+
+- name: Install PostgreSQL
+  ansible.builtin.apt:
+    name: postgresql
+    state: present
+
+- name: Create PostgreSQL data directory
+  ansible.builtin.file:
+    path: "{{ postgres__data_dir }}"
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: '0700'
+
+- name: Initialize PostgreSQL cluster
+  ansible.builtin.command:
+    cmd: "/usr/lib/postgresql/{{ postgres__version }}/bin/pg_ctl initdb -D {{ postgres__data_dir }}"
+    creates: "{{ postgres__data_dir }}/PG_VERSION"
+  become: true
+  become_user: postgres
+
+- name: Install PostgreSQL systemd service
+  ansible.builtin.template:
+    src: postgresql-custom.service.j2
+    dest: /etc/systemd/system/postgresql-custom.service
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Start PostgreSQL service
+  ansible.builtin.systemd_service:
+    name: postgresql-custom
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Configure PostgreSQL settings
+  ansible.builtin.lineinfile:
+    path: "{{ postgres__data_dir }}/postgresql.conf"
+    regexp: '^\s*#?\s*{{ item.key }}\s*='
+    line: "{{ item.key }} = {{ item.value }}"
+  loop: "{{ postgres__config | dict2items }}"
+  notify: Restart PostgreSQL
+
+- name: Configure PostgreSQL access rules
+  ansible.builtin.template:
+    src: pg_hba.conf.j2
+    dest: "{{ postgres__data_dir }}/pg_hba.conf"
+    owner: postgres
+    group: postgres
+    mode: '0600'
+  notify: Reload PostgreSQL
+tadzhnahal@pc ~/projects/ansible$ nano roles/postgres/tasks/main.yml
+tadzhnahal@pc ~/projects/ansible$ tail -n 12 roles/postgres/tasks/main.yml
+    mode: '0600'
+  notify: Reload PostgreSQL
+
+- name: Create PostgreSQL users
+  community.postgresql.postgresql_user:
+    name: "{{ item.name }}"
+    password: "{{ item.password }}"
+    state: present
+  loop: "{{ postgres__users }}"
+  become: true
+  become_user: postgres
+  no_log: true
+tadzhnahal@pc ~/projects/ansible$ nano roles/postgres/tasks/main.yml
+tadzhnahal@pc ~/projects/ansible$ tail -n 20 roles/postgres/tasks/main.yml
+    mode: '0600'
+  notify: Reload PostgreSQL
+
+- name: Create PostgreSQL users
+  community.postgresql.postgresql_user:
+    name: "{{ item.name }}"
+    password: "{{ item.password }}"
+    state: present
+  loop: "{{ postgres__users }}"
+  become: true
+  become_user: postgres
+  no_log: true
+
+- name: Create PostgreSQL databases
+  community.postgresql.postgresql_db:
+    name: "{{ item.name }}"
+    state: present
+  loop: "{{ postgres__databases }}"
+  become: true
+  become_user: postgres
+tadzhnahal@pc ~/projects/ansible$ ansible-playbook -i inventories/main/hosts.yaml playbook.yml --ask-vault-pass
+Vault password:
+
+PLAY [Configure PostgreSQL] *****************************************************************************************************************************************
+
+TASK [Gathering Facts] **********************************************************************************************************************************************
+[WARNING]: Platform linux on host vm1 is using the discovered Python interpreter at /usr/bin/python3.12, but future installation of another Python interpreter could
+change the meaning of that path. See https://docs.ansible.com/ansible-core/2.18/reference_appendices/interpreter_discovery.html for more information.
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL common tools] *******************************************************************************************************************
+changed: [vm1]
+
+TASK [postgres : Disable automatic PostgreSQL cluster creation] *****************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL] ********************************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL data directory] ******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Initialize PostgreSQL cluster] *********************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL systemd service] ****************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Start PostgreSQL service] **************************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Configure PostgreSQL settings] *********************************************************************************************************************
+ok: [vm1] => (item={'key': 'max_connections', 'value': 100})
+ok: [vm1] => (item={'key': 'shared_buffers', 'value': '128MB'})
+ok: [vm1] => (item={'key': 'log_min_duration_statement', 'value': 1000})
+
+TASK [postgres : Configure PostgreSQL access rules] *****************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL users] ***************************************************************************************************************************
+changed: [vm1] => (item=None)
+changed: [vm1]
+
+TASK [postgres : Create PostgreSQL databases] ***********************************************************************************************************************
+changed: [vm1] => (item={'name': 'app_db'})
+
+PLAY RECAP **********************************************************************************************************************************************************
+vm1                        : ok=12   changed=3    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+
+tadzhnahal@pc ~/projects/ansible$ ansible-playbook -i inventories/main/hosts.yaml playbook.yml --ask-vault-pass
+Vault password:  [ERROR]: User interrupted execution
+tadzhnahal@pc ~/projects/ansible$ ansible -i inventories/main/hosts.yaml vm1 -b --become-user postgres -m command -a 'psql -c "\l" -c "\du"'
+ERROR! Attempting to decrypt but no vault secrets found
+tadzhnahal@pc ~/projects/ansible$ ansible -i inventories/main/hosts.yaml vm1 --ask-vault-pass -b --become-user postgres -m command -a 'psql -c "\l" -c "\du"'
+Vault password:
+[WARNING]: Platform linux on host vm1 is using the discovered Python interpreter at /usr/bin/python3.12, but future installation of another Python interpreter could
+change the meaning of that path. See https://docs.ansible.com/ansible-core/2.18/reference_appendices/interpreter_discovery.html for more information.
+vm1 | CHANGED | rc=0 >>
+                                                       List of databases
+   Name    |  Owner   | Encoding | Locale Provider |   Collate   |    Ctype    | ICU Locale | ICU Rules |   Access privileges
+-----------+----------+----------+-----------------+-------------+-------------+------------+-----------+-----------------------
+ app_db    | postgres | UTF8     | libc            | en_US.UTF-8 | en_US.UTF-8 |            |           |
+ postgres  | postgres | UTF8     | libc            | en_US.UTF-8 | en_US.UTF-8 |            |           |
+ template0 | postgres | UTF8     | libc            | en_US.UTF-8 | en_US.UTF-8 |            |           | =c/postgres          +
+           |          |          |                 |             |             |            |           | postgres=CTc/postgres
+ template1 | postgres | UTF8     | libc            | en_US.UTF-8 | en_US.UTF-8 |            |           | =c/postgres          +
+           |          |          |                 |             |             |            |           | postgres=CTc/postgres
+(4 rows)
+
+                             List of roles
+ Role name |                         Attributes
+-----------+------------------------------------------------------------
+ app_user  |
+ postgres  | Superuser, Create role, Create DB, Replication, Bypass RLS
+tadzhnahal@pc ~/projects/ansible$ nano roles/postgres/tasks/main.yml
+tadzhnahal@pc ~/projects/ansible$ tail -n 28 roles/postgres/tasks/main.yml
+    group: postgres
+    mode: '0600'
+  notify: Reload PostgreSQL
+
+- name: Check PostgreSQL connection
+  ansible.builtin.command:
+    cmd: 'psql -tAc "select 1"'
+  become: true
+  become_user: postgres
+  changed_when: false
+
+- name: Create PostgreSQL users
+  community.postgresql.postgresql_user:
+    name: "{{ item.name }}"
+    password: "{{ item.password }}"
+    state: present
+  loop: "{{ postgres__users }}"
+  become: true
+  become_user: postgres
+  no_log: true
+
+- name: Create PostgreSQL databases
+  community.postgresql.postgresql_db:
+    name: "{{ item.name }}"
+    state: present
+  loop: "{{ postgres__databases }}"
+  become: true
+  become_user: postgres
+tadzhnahal@pc ~/projects/ansible$ ansible-playbook -i inventories/main/hosts.yaml playbook.yml --ask-vault-pass
+Vault password:
+
+PLAY [Configure PostgreSQL] *****************************************************************************************************************************************
+
+TASK [Gathering Facts] **********************************************************************************************************************************************
+[WARNING]: Platform linux on host vm1 is using the discovered Python interpreter at /usr/bin/python3.12, but future installation of another Python interpreter could
+change the meaning of that path. See https://docs.ansible.com/ansible-core/2.18/reference_appendices/interpreter_discovery.html for more information.
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL common tools] *******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Disable automatic PostgreSQL cluster creation] *****************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL] ********************************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL data directory] ******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Initialize PostgreSQL cluster] *********************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL systemd service] ****************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Start PostgreSQL service] **************************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Configure PostgreSQL settings] *********************************************************************************************************************
+ok: [vm1] => (item={'key': 'max_connections', 'value': 100})
+ok: [vm1] => (item={'key': 'shared_buffers', 'value': '128MB'})
+ok: [vm1] => (item={'key': 'log_min_duration_statement', 'value': 1000})
+
+TASK [postgres : Configure PostgreSQL access rules] *****************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Check PostgreSQL connection] ***********************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL users] ***************************************************************************************************************************
+ok: [vm1] => (item=None)
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL databases] ***********************************************************************************************************************
+ok: [vm1] => (item={'name': 'app_db'})
+
+PLAY RECAP **********************************************************************************************************************************************************
+vm1                        : ok=13   changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+
+tadzhnahal@pc ~/projects/ansible$ nano roles/postgres/defaults/main.yml
+tadzhnahal@pc ~/projects/ansible$ nano roles/postgres/defaults/main.yml
+tadzhnahal@pc ~/projects/ansible$ tail -n 8 roles/postgres/defaults/main.yml
+postgres__databases:
+  - name: app_db
+
+postgres__users:
+  - name: app_user
+    password: "{{ vault_postgres_app_password }}"
+
+postgres__exporter_version: "0.20.1"
+tadzhnahal@pc ~/projects/ansible$ nano roles/postgres/defaults/main.yml
+tadzhnahal@pc ~/projects/ansible$ tail -n 5 roles/postgres/defaults/main.yml
+  - name: app_user
+    password: "{{ vault_postgres_app_password }}"
+
+postgres__exporter_version: "0.20.1"
+postgres__exporter_user: postgres_exporter
+tadzhnahal@pc ~/projects/ansible$ nano roles/postgres/tasks/main.yml
+tadzhnahal@pc ~/projects/ansible$ tail -n 12 roles/postgres/tasks/main.yml
+    state: present
+  loop: "{{ postgres__databases }}"
+  become: true
+  become_user: postgres
+
+- name: Create exporter system user
+  ansible.builtin.user:
+    name: "{{ postgres__exporter_user }}"
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+    state: present
+tadzhnahal@pc ~/projects/ansible$ nano roles/postgres/tasks/main.yml
+tadzhnahal@pc ~/projects/ansible$ tail -n 18 roles/postgres/tasks/main.yml
+  loop: "{{ postgres__databases }}"
+  become: true
+  become_user: postgres
+
+- name: Create exporter system user
+  ansible.builtin.user:
+    name: "{{ postgres__exporter_user }}"
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+    state: present
+
+- name: Create exporter PostgreSQL user
+  community.postgresql.postgresql_user:
+    name: "{{ postgres__exporter_user }}"
+    state: present
+  become: true
+  become_user: postgres
+tadzhnahal@pc ~/projects/ansible$ nano roles/postgres/tasks/main.yml
+tadzhnahal@pc ~/projects/ansible$ tail -n 25 roles/postgres/tasks/main.yml
+  become_user: postgres
+
+- name: Create exporter system user
+  ansible.builtin.user:
+    name: "{{ postgres__exporter_user }}"
+    system: true
+    create_home: false
+    shell: /usr/sbin/nologin
+    state: present
+
+- name: Create exporter PostgreSQL user
+  community.postgresql.postgresql_user:
+    name: "{{ postgres__exporter_user }}"
+    state: present
+  become: true
+  become_user: postgres
+
+- name: Grant monitoring permissions to exporter
+  community.postgresql.postgresql_membership:
+    group: pg_monitor
+    target_roles:
+      - "{{ postgres__exporter_user }}"
+    state: present
+  become: true
+  become_user: postgres
+tadzhnahal@pc ~/projects/ansible$ ansible-playbook -i inventories/main/hosts.yaml playbook.yml --ask-vault-pass
+Vault password:
+
+PLAY [Configure PostgreSQL] *****************************************************************************************************************************************
+
+TASK [Gathering Facts] **********************************************************************************************************************************************
+[WARNING]: Platform linux on host vm1 is using the discovered Python interpreter at /usr/bin/python3.12, but future installation of another Python interpreter could
+change the meaning of that path. See https://docs.ansible.com/ansible-core/2.18/reference_appendices/interpreter_discovery.html for more information.
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL common tools] *******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Disable automatic PostgreSQL cluster creation] *****************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL] ********************************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL data directory] ******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Initialize PostgreSQL cluster] *********************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL systemd service] ****************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Start PostgreSQL service] **************************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Configure PostgreSQL settings] *********************************************************************************************************************
+ok: [vm1] => (item={'key': 'max_connections', 'value': 100})
+ok: [vm1] => (item={'key': 'shared_buffers', 'value': '128MB'})
+ok: [vm1] => (item={'key': 'log_min_duration_statement', 'value': 1000})
+
+TASK [postgres : Configure PostgreSQL access rules] *****************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Check PostgreSQL connection] ***********************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL users] ***************************************************************************************************************************
+ok: [vm1] => (item=None)
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL databases] ***********************************************************************************************************************
+ok: [vm1] => (item={'name': 'app_db'})
+
+TASK [postgres : Create exporter system user] ***********************************************************************************************************************
+changed: [vm1]
+
+TASK [postgres : Create exporter PostgreSQL user] *******************************************************************************************************************
+changed: [vm1]
+
+TASK [postgres : Grant monitoring permissions to exporter] **********************************************************************************************************
+[DEPRECATION WARNING]: Param 'groups' is deprecated. See the module docs for more information. This feature will be removed from community.postgresql in version
+6.0.0. Deprecation warnings can be disabled by setting deprecation_warnings=False in ansible.cfg.
+changed: [vm1]
+
+PLAY RECAP **********************************************************************************************************************************************************
+vm1                        : ok=16   changed=3    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+
+tadzhnahal@pc ~/projects/ansible$ ansible -i inventories/main/hosts.yaml vm1 --ask-vault-pass -b --become-user postgres -m command -a 'psql -c "\du postgres_exporter"'
+Vault password:
+[WARNING]: Platform linux on host vm1 is using the discovered Python interpreter at /usr/bin/python3.12, but future installation of another Python interpreter could
+change the meaning of that path. See https://docs.ansible.com/ansible-core/2.18/reference_appendices/interpreter_discovery.html for more information.
+vm1 | CHANGED | rc=0 >>
+         List of roles
+     Role name     | Attributes
+-------------------+------------
+ postgres_exporter |
+tadzhnahal@pc ~/projects/ansible$ ansible -i inventories/main/hosts.yaml vm1 --ask-vault-pass -b --become-user postgres -m command -a "psql -tAc \"select pg_has_role('postgres_exporter', 'pg_monitor', 'member')\""
+Vault password:
+[WARNING]: Platform linux on host vm1 is using the discovered Python interpreter at /usr/bin/python3.12, but future installation of another Python interpreter could
+change the meaning of that path. See https://docs.ansible.com/ansible-core/2.18/reference_appendices/interpreter_discovery.html for more information.
+vm1 | CHANGED | rc=0 >>
+t
+tadzhnahal@pc ~/projects/ansible$ ansible -i inventories/main/hosts.yaml vm1 --ask-vault-pass -b --become-user postgres_exporter -m command -a 'psql -d postgres -tAc "select 1"'
+Vault password:
+[WARNING]: Unable to use /home/postgres_exporter/.ansible/tmp as temporary directory, failing back to system: [Errno 13] Permission denied:
+'/home/postgres_exporter'
+[WARNING]: Platform linux on host vm1 is using the discovered Python interpreter at /usr/bin/python3.12, but future installation of another Python interpreter could
+change the meaning of that path. See https://docs.ansible.com/ansible-core/2.18/reference_appendices/interpreter_discovery.html for more information.
+vm1 | CHANGED | rc=0 >>
+1
+tadzhnahal@pc ~/projects/ansible$ nano roles/postgres/tasks/main.yml
+tadzhnahal@pc ~/projects/ansible$ tail -n 10 roles/postgres/tasks/main.yml
+  become: true
+  become_user: postgres
+
+- name: Download postgres-exporter
+  ansible.builtin.get_url:
+    url: "https://github.com/prometheus-community/postgres_exporter/releases/download/v{{ postgres__exporter_version }}/postgres_exporter-{{ postgres__exporter_version }}.linux-amd64.tar.gz"
+    dest: "/tmp/postgres_exporter-{{ postgres__exporter_version }}.linux-amd64.tar.gz"
+    mode: '0644'
+  delegate_to: localhost
+  become: false
+tadzhnahal@pc ~/projects/ansible$ nano roles/postgres/tasks/main.yml
+tadzhnahal@pc ~/projects/ansible$ tail -n 20 roles/postgres/tasks/main.yml
+    state: present
+  become: true
+  become_user: postgres
+
+- name: Download postgres-exporter
+  ansible.builtin.get_url:
+    url: "https://github.com/prometheus-community/postgres_exporter/releases/download/v{{ postgres__exporter_version }}/postgres_exporter-{{ postgres__exporter_version }}.linux-amd64.tar.gz"
+    dest: "/tmp/postgres_exporter-{{ postgres__exporter_version }}.linux-amd64.tar.gz"
+    mode: '0644'
+  delegate_to: localhost
+  become: false
+
+- name: Extract postgres-exporter
+  ansible.builtin.unarchive:
+    src: "/tmp/postgres_exporter-{{ postgres__exporter_version }}.linux-amd64.tar.gz"
+    dest: /tmp
+    remote_src: true
+    creates: "/tmp/postgres_exporter-{{ postgres__exporter_version }}.linux-amd64/postgres_exporter"
+  delegate_to: localhost
+  become: false
+tadzhnahal@pc ~/projects/ansible$ nano roles/postgres/tasks/main.yml
+tadzhnahal@pc ~/projects/ansible$ tail -n 15 roles/postgres/tasks/main.yml
+  ansible.builtin.unarchive:
+    src: "/tmp/postgres_exporter-{{ postgres__exporter_version }}.linux-amd64.tar.gz"
+    dest: /tmp
+    remote_src: true
+    creates: "/tmp/postgres_exporter-{{ postgres__exporter_version }}.linux-amd64/postgres_exporter"
+  delegate_to: localhost
+  become: false
+
+- name: Install postgres-exporter binary
+  ansible.builtin.copy:
+    src: "/tmp/postgres_exporter-{{ postgres__exporter_version }}.linux-amd64/postgres_exporter"
+    dest: /usr/local/bin/postgres_exporter
+    owner: root
+    group: root
+    mode: '0755'
+tadzhnahal@pc ~/projects/ansible$ nano roles/postgres/templates/postgres-exporter.service.j2
+tadzhnahal@pc ~/projects/ansible$ cat roles/postgres/templates/postgres-exporter.service.j2
+[Unit]
+Description=Prometheus PostgreSQL Exporter
+After=network.target postgresql-custom.service
+Requires=postgresql-custom.service
+
+[Service]
+Type=simple
+User={{ postgres__exporter_user }}
+Environment="DATA_SOURCE_NAME=user={{ postgres__exporter_user }} host=/var/run/postgresql dbname=postgres sslmode=disable"
+ExecStart=/usr/local/bin/postgres_exporter --web.listen-address=127.0.0.1:9187
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+tadzhnahal@pc ~/projects/ansible$ nano roles/postgres/tasks/main.yml
+tadzhnahal@pc ~/projects/ansible$ tail -n 22 roles/postgres/tasks/main.yml
+- name: Install postgres-exporter binary
+  ansible.builtin.copy:
+    src: "/tmp/postgres_exporter-{{ postgres__exporter_version }}.linux-amd64/postgres_exporter"
+    dest: /usr/local/bin/postgres_exporter
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install postgres-exporter service
+  ansible.builtin.template:
+    src: postgres-exporter.service.j2
+    dest: /etc/systemd/system/postgres-exporter.service
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Start postgres-exporter service
+  ansible.builtin.systemd_service:
+    name: postgres-exporter
+    state: started
+    enabled: true
+    daemon_reload: true
+tadzhnahal@pc ~/projects/ansible$ nano roles/postgres/handlers/main.yml
+tadzhnahal@pc ~/projects/ansible$ cat roles/postgres/handlers/main.yml
+---
+- name: Restart PostgreSQL
+  ansible.builtin.systemd_service:
+    name: postgresql-custom
+    state: restarted
+
+- name: Reload PostgreSQL
+  ansible.builtin.systemd_service:
+    name: postgresql-custom
+    state: reloaded
+
+- name: Restart postgres-exporter
+  ansible.builtin.systemd_service:
+    name: postgres-exporter
+    state: restarted
+    daemon_reload: true
+tadzhnahal@pc ~/projects/ansible$ nano roles/postgres/tasks/main.yml
+tadzhnahal@pc ~/projects/ansible$ nano roles/postgres/tasks/main.yml
+tadzhnahal@pc ~/projects/ansible$ tail -n 25 roles/postgres/tasks/main.yml
+
+- name: Install postgres-exporter binary
+  ansible.builtin.copy:
+    src: "/tmp/postgres_exporter-{{ postgres__exporter_version }}.linux-amd64/postgres_exporter"
+    dest: /usr/local/bin/postgres_exporter
+    owner: root
+    group: root
+    mode: '0755'
+  notify: Restart postgres-exporter
+
+- name: Install postgres-exporter service
+  ansible.builtin.template:
+    src: postgres-exporter.service.j2
+    dest: /etc/systemd/system/postgres-exporter.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart postgres-exporter
+
+- name: Start postgres-exporter service
+  ansible.builtin.systemd_service:
+    name: postgres-exporter
+    state: started
+    enabled: true
+    daemon_reload: true
+tadzhnahal@pc ~/projects/ansible$ ansible-playbook -i inventories/main/hosts.yaml playbook.yml --syntax-check --ask-vault-pass
+Vault password:
+
+playbook: playbook.yml
+tadzhnahal@pc ~/projects/ansible$ ansible-playbook -i inventories/main/hosts.yaml playbook.yml --ask-vault-pass
+Vault password:
+
+PLAY [Configure PostgreSQL] *****************************************************************************************************************************************
+
+TASK [Gathering Facts] **********************************************************************************************************************************************
+[WARNING]: Platform linux on host vm1 is using the discovered Python interpreter at /usr/bin/python3.12, but future installation of another Python interpreter could
+change the meaning of that path. See https://docs.ansible.com/ansible-core/2.18/reference_appendices/interpreter_discovery.html for more information.
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL common tools] *******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Disable automatic PostgreSQL cluster creation] *****************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL] ********************************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL data directory] ******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Initialize PostgreSQL cluster] *********************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL systemd service] ****************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Start PostgreSQL service] **************************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Configure PostgreSQL settings] *********************************************************************************************************************
+ok: [vm1] => (item={'key': 'max_connections', 'value': 100})
+ok: [vm1] => (item={'key': 'shared_buffers', 'value': '128MB'})
+ok: [vm1] => (item={'key': 'log_min_duration_statement', 'value': 1000})
+
+TASK [postgres : Configure PostgreSQL access rules] *****************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Check PostgreSQL connection] ***********************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL users] ***************************************************************************************************************************
+ok: [vm1] => (item=None)
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL databases] ***********************************************************************************************************************
+ok: [vm1] => (item={'name': 'app_db'})
+
+TASK [postgres : Create exporter system user] ***********************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create exporter PostgreSQL user] *******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Grant monitoring permissions to exporter] **********************************************************************************************************
+[DEPRECATION WARNING]: Param 'groups' is deprecated. See the module docs for more information. This feature will be removed from community.postgresql in version
+6.0.0. Deprecation warnings can be disabled by setting deprecation_warnings=False in ansible.cfg.
+ok: [vm1]
+
+TASK [postgres : Download postgres-exporter] ************************************************************************************************************************
+changed: [vm1 -> localhost]
+
+TASK [postgres : Extract postgres-exporter] *************************************************************************************************************************
+changed: [vm1 -> localhost]
+
+TASK [postgres : Install postgres-exporter binary] ******************************************************************************************************************
+changed: [vm1]
+
+TASK [postgres : Install postgres-exporter service] *****************************************************************************************************************
+changed: [vm1]
+
+TASK [postgres : Start postgres-exporter service] *******************************************************************************************************************
+changed: [vm1]
+
+RUNNING HANDLER [postgres : Restart postgres-exporter] **************************************************************************************************************
+changed: [vm1]
+
+PLAY RECAP **********************************************************************************************************************************************************
+vm1                        : ok=22   changed=6    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+
+tadzhnahal@pc ~/projects/ansible$ ansible -i inventories/main/hosts.yaml vm1 --ask-vault-pass -b -m command -a 'systemctl is-active postgresql-custom postgres-exporter'
+Vault password:
+[WARNING]: Platform linux on host vm1 is using the discovered Python interpreter at /usr/bin/python3.12, but future installation of another Python interpreter could
+change the meaning of that path. See https://docs.ansible.com/ansible-core/2.18/reference_appendices/interpreter_discovery.html for more information.
+vm1 | CHANGED | rc=0 >>
+active
+active
+tadzhnahal@pc ~/projects/ansible$ ansible -i inventories/main/hosts.yaml vm1 --ask-vault-pass -m uri -a 'url=http://127.0.0.1:9187/metrics return_content=true' | grep 'pg_up 1'
+Vault password:
+[WARNING]: Platform linux on host vm1 is using the discovered Python
+interpreter at /usr/bin/python3.12, but future installation of another Python
+interpreter could change the meaning of that path. See
+https://docs.ansible.com/ansible-
+core/2.18/reference_appendices/interpreter_discovery.html for more information.
+    "content": "# HELP go_gc_duration_seconds A summary of the wall-time pause (stop-the-world) duration in garbage collection cycles.\n# TYPE go_gc_duration_seconds summary\ngo_gc_duration_seconds{quantile=\"0\"} 0\ngo_gc_duration_seconds{quantile=\"0.25\"} 0\ngo_gc_duration_seconds{quantile=\"0.5\"} 0\ngo_gc_duration_seconds{quantile=\"0.75\"} 0\ngo_gc_duration_seconds{quantile=\"1\"} 0\ngo_gc_duration_seconds_sum 0\ngo_gc_duration_seconds_count 0\n# HELP go_gc_gogc_percent Heap size target percentage configured by the user, otherwise 100. This value is set by the GOGC environment variable, and the runtime/debug.SetGCPercent function. Sourced from /gc/gogc:percent.\n# TYPE go_gc_gogc_percent gauge\ngo_gc_gogc_percent 100\n# HELP go_gc_gomemlimit_bytes Go runtime memory limit configured by the user, otherwise math.MaxInt64. This value is set by the GOMEMLIMIT environment variable, and the runtime/debug.SetMemoryLimit function. Sourced from /gc/gomemlimit:bytes.\n# TYPE go_gc_gomemlimit_bytes gauge\ngo_gc_gomemlimit_bytes 9.223372036854776e+18\n# HELP go_goroutines Number of goroutines that currently exist.\n# TYPE go_goroutines gauge\ngo_goroutines 11\n# HELP go_info Information about the Go environment.\n# TYPE go_info gauge\ngo_info{version=\"go1.26.4\"} 1\n# HELP go_memstats_alloc_bytes Number of bytes allocated in heap and currently in use. Equals to /memory/classes/heap/objects:bytes.\n# TYPE go_memstats_alloc_bytes gauge\ngo_memstats_alloc_bytes 376144\n# HELP go_memstats_alloc_bytes_total Total number of bytes allocated in heap until now, even if released already. Equals to /gc/heap/allocs:bytes.\n# TYPE go_memstats_alloc_bytes_total counter\ngo_memstats_alloc_bytes_total 376144\n# HELP go_memstats_buck_hash_sys_bytes Number of bytes used by the profiling bucket hash table. Equals to /memory/classes/profiling/buckets:bytes.\n# TYPE go_memstats_buck_hash_sys_bytes gauge\ngo_memstats_buck_hash_sys_bytes 1.44517e+06\n# HELP go_memstats_frees_total Total number of heap objects frees. Equals to /gc/heap/frees:objects + /gc/heap/tiny/allocs:objects.\n# TYPE go_memstats_frees_total counter\ngo_memstats_frees_total 232\n# HELP go_memstats_gc_sys_bytes Number of bytes used for garbage collection system metadata. Equals to /memory/classes/metadata/other:bytes.\n# TYPE go_memstats_gc_sys_bytes gauge\ngo_memstats_gc_sys_bytes 1.482512e+06\n# HELP go_memstats_heap_alloc_bytes Number of heap bytes allocated and currently in use, same asgo_memstats_alloc_bytes. Equals to /memory/classes/heap/objects:bytes.\n# TYPE go_memstats_heap_alloc_bytes gauge\ngo_memstats_heap_alloc_bytes 376144\n# HELP go_memstats_heap_idle_bytes Number of heap bytes waiting to be used. Equals to /memory/classes/heap/released:bytes + /memory/classes/heap/free:bytes.\n# TYPE go_memstats_heap_idle_bytes gauge\ngo_memstats_heap_idle_bytes 6.10304e+06\n# HELP go_memstats_heap_inuse_bytes Number of heap bytes that are in use. Equals to /memory/classes/heap/objects:bytes + /memory/classes/heap/unused:bytes\n# TYPE go_memstats_heap_inuse_bytes gauge\ngo_memstats_heap_inuse_bytes 1.859584e+06\n# HELP go_memstats_heap_objects Number of currently allocated objects. Equals to /gc/heap/objects:objects.\n# TYPE go_memstats_heap_objects gauge\ngo_memstats_heap_objects 2528\n# HELP go_memstats_heap_released_bytes Number of heap bytes released to OS. Equals to /memory/classes/heap/released:bytes.\n# TYPE go_memstats_heap_released_bytes gauge\ngo_memstats_heap_released_bytes 6.10304e+06\n# HELP go_memstats_heap_sys_bytes Number of heap bytes obtained from system. Equals to /memory/classes/heap/objects:bytes + /memory/classes/heap/unused:bytes + /memory/classes/heap/released:bytes + /memory/classes/heap/free:bytes.\n# TYPE go_memstats_heap_sys_bytes gauge\ngo_memstats_heap_sys_bytes 7.962624e+06\n# HELP go_memstats_last_gc_time_seconds Number of seconds since 1970 of last garbage collection.\n# TYPE go_memstats_last_gc_time_seconds gauge\ngo_memstats_last_gc_time_seconds 0\n# HELP go_memstats_mallocs_total Total number of heap objects allocated, both live and gc-ed. Semantically a counter version for go_memstats_heap_objects gauge. Equals to /gc/heap/allocs:objects + /gc/heap/tiny/allocs:objects.\n# TYPE go_memstats_mallocs_total counter\ngo_memstats_mallocs_total 2760\n# HELP go_memstats_mcache_inuse_bytes Number of bytes in use by mcache structures. Equals to /memory/classes/metadata/mcache/inuse:bytes.\n# TYPE go_memstats_mcache_inuse_bytes gauge\ngo_memstats_mcache_inuse_bytes 4592\n# HELP go_memstats_mcache_sys_bytes Number of bytes used for mcache structures obtained from system. Equals to /memory/classes/metadata/mcache/inuse:bytes + /memory/classes/metadata/mcache/free:bytes.\n# TYPE go_memstats_mcache_sys_bytes gauge\ngo_memstats_mcache_sys_bytes 16072\n# HELP go_memstats_mspan_inuse_bytes Number of bytes in use by mspan structures. Equals to /memory/classes/metadata/mspan/inuse:bytes.\n# TYPE go_memstats_mspan_inuse_bytes gauge\ngo_memstats_mspan_inuse_bytes 44320\n# HELP go_memstats_mspan_sys_bytes Number of bytes used for mspan structures obtained from system. Equals to /memory/classes/metadata/mspan/inuse:bytes + /memory/classes/metadata/mspan/free:bytes.\n# TYPE go_memstats_mspan_sys_bytes gauge\ngo_memstats_mspan_sys_bytes 48960\n# HELP go_memstats_next_gc_bytes Number of heap bytes when next garbage collection will take place. Equals to /gc/heap/goal:bytes.\n# TYPE go_memstats_next_gc_bytes gauge\ngo_memstats_next_gc_bytes 4.194304e+06\n# HELP go_memstats_other_sys_bytes Number of bytes used for other system allocations. Equals to /memory/classes/other:bytes.\n# TYPE go_memstats_other_sys_bytes gauge\ngo_memstats_other_sys_bytes 634558\n# HELP go_memstats_stack_inuse_bytes Number of bytes obtained from system for stack allocator in non-CGO environments. Equals to /memory/classes/heap/stacks:bytes.\n# TYPE go_memstats_stack_inuse_bytes gauge\ngo_memstats_stack_inuse_bytes 425984\n# HELP go_memstats_stack_sys_bytes Number of bytes obtained from system for stack allocator. Equals to /memory/classes/heap/stacks:bytes + /memory/classes/os-stacks:bytes.\n# TYPE go_memstats_stack_sys_bytes gauge\ngo_memstats_stack_sys_bytes 425984\n# HELP go_memstats_sys_bytes Number of bytes obtained from system. Equals to /memory/classes/total:byte.\n# TYPE go_memstats_sys_bytes gauge\ngo_memstats_sys_bytes 1.201588e+07\n# HELP go_sched_gomaxprocs_threads The current runtime.GOMAXPROCS setting, or the number of operating system threads that can execute user-level Go code simultaneously. Sourced from /sched/gomaxprocs:threads.\n# TYPE go_sched_gomaxprocs_threads gauge\ngo_sched_gomaxprocs_threads 2\n# HELP go_threads Number of OS threads created.\n# TYPE go_threads gauge\ngo_threads 4\n# HELP pg_database_connection_limit Connection limit set for the database\n# TYPE pg_database_connection_limit gauge\npg_database_connection_limit{datname=\"app_db\"} -1\npg_database_connection_limit{datname=\"postgres\"} -1\npg_database_connection_limit{datname=\"template0\"} -1\npg_database_connection_limit{datname=\"template1\"} -1\n# HELP pg_database_size_bytes Disk space used by the database\n# TYPE pg_database_size_bytes gauge\npg_database_size_bytes{datname=\"app_db\"} 7.586319e+06\npg_database_size_bytes{datname=\"postgres\"} 7.683095e+06\npg_database_size_bytes{datname=\"template0\"} 7.520783e+06\npg_database_size_bytes{datname=\"template1\"} 7.748631e+06\n# HELP pg_exporter_last_scrape_duration_seconds Duration of the last scrape of metrics from PostgreSQL.\n# TYPE pg_exporter_last_scrape_duration_seconds gauge\npg_exporter_last_scrape_duration_seconds 0.005632724\n# HELP pg_exporter_last_scrape_error Whether the last scrape of metrics from PostgreSQL resulted in an error (1 for error, 0 for success).\n# TYPE pg_exporter_last_scrape_error gauge\npg_exporter_last_scrape_error 0\n# HELP pg_exporter_scrapes_total Total number of times PostgreSQL was scraped for metrics.\n# TYPE pg_exporter_scrapes_total counter\npg_exporter_scrapes_total 1\n# HELP pg_locks_count Number of locks\n# TYPE pg_locks_count gauge\npg_locks_count{datname=\"app_db\",mode=\"accessexclusivelock\"} 0\npg_locks_count{datname=\"app_db\",mode=\"accesssharelock\"} 0\npg_locks_count{datname=\"app_db\",mode=\"exclusivelock\"} 0\npg_locks_count{datname=\"app_db\",mode=\"rowexclusivelock\"} 0\npg_locks_count{datname=\"app_db\",mode=\"rowsharelock\"} 0\npg_locks_count{datname=\"app_db\",mode=\"sharelock\"} 0\npg_locks_count{datname=\"app_db\",mode=\"sharerowexclusivelock\"} 0\npg_locks_count{datname=\"app_db\",mode=\"shareupdateexclusivelock\"} 0\npg_locks_count{datname=\"app_db\",mode=\"sireadlock\"} 0\npg_locks_count{datname=\"postgres\",mode=\"accessexclusivelock\"} 0\npg_locks_count{datname=\"postgres\",mode=\"accesssharelock\"} 1\npg_locks_count{datname=\"postgres\",mode=\"exclusivelock\"} 0\npg_locks_count{datname=\"postgres\",mode=\"rowexclusivelock\"} 0\npg_locks_count{datname=\"postgres\",mode=\"rowsharelock\"} 0\npg_locks_count{datname=\"postgres\",mode=\"sharelock\"} 0\npg_locks_count{datname=\"postgres\",mode=\"sharerowexclusivelock\"} 0\npg_locks_count{datname=\"postgres\",mode=\"shareupdateexclusivelock\"} 0\npg_locks_count{datname=\"postgres\",mode=\"sireadlock\"} 0\npg_locks_count{datname=\"template0\",mode=\"accessexclusivelock\"} 0\npg_locks_count{datname=\"template0\",mode=\"accesssharelock\"} 0\npg_locks_count{datname=\"template0\",mode=\"exclusivelock\"} 0\npg_locks_count{datname=\"template0\",mode=\"rowexclusivelock\"} 0\npg_locks_count{datname=\"template0\",mode=\"rowsharelock\"} 0\npg_locks_count{datname=\"template0\",mode=\"sharelock\"} 0\npg_locks_count{datname=\"template0\",mode=\"sharerowexclusivelock\"} 0\npg_locks_count{datname=\"template0\",mode=\"shareupdateexclusivelock\"} 0\npg_locks_count{datname=\"template0\",mode=\"sireadlock\"} 0\npg_locks_count{datname=\"template1\",mode=\"accessexclusivelock\"} 0\npg_locks_count{datname=\"template1\",mode=\"accesssharelock\"} 0\npg_locks_count{datname=\"template1\",mode=\"exclusivelock\"} 0\npg_locks_count{datname=\"template1\",mode=\"rowexclusivelock\"} 0\npg_locks_count{datname=\"template1\",mode=\"rowsharelock\"} 0\npg_locks_count{datname=\"template1\",mode=\"sharelock\"} 0\npg_locks_count{datname=\"template1\",mode=\"sharerowexclusivelock\"} 0\npg_locks_count{datname=\"template1\",mode=\"shareupdateexclusivelock\"} 0\npg_locks_count{datname=\"template1\",mode=\"sireadlock\"} 0\n# HELP pg_replication_is_replica Indicates if the server is a replica\n# TYPE pg_replication_is_replica gauge\npg_replication_is_replica 0\n# HELP pg_replication_lag_seconds Replication lag behind master in seconds\n# TYPE pg_replication_lag_seconds gauge\npg_replication_lag_seconds 0\n# HELP pg_replication_last_replay_seconds Age of last replay in seconds\n# TYPE pg_replication_last_replay_seconds gauge\npg_replication_last_replay_seconds 0\n# HELP pg_roles_connection_limit Connection limit set for the role\n# TYPE pg_roles_connection_limit gauge\npg_roles_connection_limit{rolname=\"app_user\"} -1\npg_roles_connection_limit{rolname=\"pg_checkpoint\"} -1\npg_roles_connection_limit{rolname=\"pg_create_subscription\"} -1\npg_roles_connection_limit{rolname=\"pg_database_owner\"} -1\npg_roles_connection_limit{rolname=\"pg_execute_server_program\"} -1\npg_roles_connection_limit{rolname=\"pg_monitor\"} -1\npg_roles_connection_limit{rolname=\"pg_read_all_data\"} -1\npg_roles_connection_limit{rolname=\"pg_read_all_settings\"} -1\npg_roles_connection_limit{rolname=\"pg_read_all_stats\"} -1\npg_roles_connection_limit{rolname=\"pg_read_server_files\"} -1\npg_roles_connection_limit{rolname=\"pg_signal_backend\"} -1\npg_roles_connection_limit{rolname=\"pg_stat_scan_tables\"} -1\npg_roles_connection_limit{rolname=\"pg_use_reserved_connections\"} -1\npg_roles_connection_limit{rolname=\"pg_write_all_data\"} -1\npg_roles_connection_limit{rolname=\"pg_write_server_files\"} -1\npg_roles_connection_limit{rolname=\"postgres\"} -1\npg_roles_connection_limit{rolname=\"postgres_exporter\"} -1\n# HELP pg_scrape_collector_duration_seconds postgres_exporter: Duration of a collector scrape.\n# TYPE pg_scrape_collector_duration_seconds gauge\npg_scrape_collector_duration_seconds{collector=\"database\"} 0.01726333\npg_scrape_collector_duration_seconds{collector=\"locks\"} 0.014724248\npg_scrape_collector_duration_seconds{collector=\"replication\"} 0.01399873\npg_scrape_collector_duration_seconds{collector=\"replication_slots\"} 0.010898251\npg_scrape_collector_duration_seconds{collector=\"roles\"} 0.01510675\npg_scrape_collector_duration_seconds{collector=\"settings\"} 0.010610119\npg_scrape_collector_duration_seconds{collector=\"stat_activity\"} 0.012558488\npg_scrape_collector_duration_seconds{collector=\"stat_archiver\"} 0.013726376\npg_scrape_collector_duration_seconds{collector=\"stat_bgwriter\"} 0.006382227\npg_scrape_collector_duration_seconds{collector=\"stat_database\"} 0.01316541\npg_scrape_collector_duration_seconds{collector=\"stat_progress_vacuum\"} 0.013514468\npg_scrape_collector_duration_seconds{collector=\"stat_replication\"} 0.008770424\npg_scrape_collector_duration_seconds{collector=\"stat_user_tables\"} 0.006181973\npg_scrape_collector_duration_seconds{collector=\"statio_user_tables\"} 0.004317469\npg_scrape_collector_duration_seconds{collector=\"wal\"} 0.00132749\n# HELP pg_scrape_collector_success postgres_exporter: Whether a collector succeeded.\n# TYPE pg_scrape_collector_success gauge\npg_scrape_collector_success{collector=\"database\"} 1\npg_scrape_collector_success{collector=\"locks\"} 1\npg_scrape_collector_success{collector=\"replication\"} 1\npg_scrape_collector_success{collector=\"replication_slots\"} 1\npg_scrape_collector_success{collector=\"roles\"} 1\npg_scrape_collector_success{collector=\"settings\"} 1\npg_scrape_collector_success{collector=\"stat_activity\"} 1\npg_scrape_collector_success{collector=\"stat_archiver\"} 1\npg_scrape_collector_success{collector=\"stat_bgwriter\"} 1\npg_scrape_collector_success{collector=\"stat_database\"} 1\npg_scrape_collector_success{collector=\"stat_progress_vacuum\"} 1\npg_scrape_collector_success{collector=\"stat_replication\"} 1\npg_scrape_collector_success{collector=\"stat_user_tables\"} 1\npg_scrape_collector_success{collector=\"statio_user_tables\"} 1\npg_scrape_collector_success{collector=\"wal\"} 1\n# HELP pg_settings_allow_in_place_tablespaces Server Parameter: allow_in_place_tablespaces\n# TYPE pg_settings_allow_in_place_tablespaces gauge\npg_settings_allow_in_place_tablespaces 0\n# HELP pg_settings_allow_system_table_mods Server Parameter: allow_system_table_mods\n# TYPE pg_settings_allow_system_table_modsgauge\npg_settings_allow_system_table_mods 0\n# HELP pg_settings_archive_timeout_seconds Server Parameter: archive_timeout [Units converted to seconds.]\n# TYPE pg_settings_archive_timeout_seconds gauge\npg_settings_archive_timeout_seconds 0\n# HELP pg_settings_array_nulls Server Parameter: array_nulls\n# TYPE pg_settings_array_nulls gauge\npg_settings_array_nulls 1\n# HELP pg_settings_authentication_timeout_seconds Server Parameter: authentication_timeout [Units converted to seconds.]\n# TYPE pg_settings_authentication_timeout_seconds gauge\npg_settings_authentication_timeout_seconds 60\n# HELP pg_settings_autovacuum Server Parameter: autovacuum\n# TYPE pg_settings_autovacuum gauge\npg_settings_autovacuum 1\n# HELP pg_settings_autovacuum_analyze_scale_factor Server Parameter: autovacuum_analyze_scale_factor\n# TYPE pg_settings_autovacuum_analyze_scale_factor gauge\npg_settings_autovacuum_analyze_scale_factor 0.1\n# HELP pg_settings_autovacuum_analyze_threshold Server Parameter: autovacuum_analyze_threshold\n# TYPE pg_settings_autovacuum_analyze_threshold gauge\npg_settings_autovacuum_analyze_threshold 50\n# HELP pg_settings_autovacuum_freeze_max_age Server Parameter: autovacuum_freeze_max_age\n# TYPE pg_settings_autovacuum_freeze_max_age gauge\npg_settings_autovacuum_freeze_max_age 2e+08\n# HELP pg_settings_autovacuum_max_workers Server Parameter: autovacuum_max_workers\n# TYPE pg_settings_autovacuum_max_workers gauge\npg_settings_autovacuum_max_workers 3\n# HELP pg_settings_autovacuum_multixact_freeze_max_age Server Parameter: autovacuum_multixact_freeze_max_age\n# TYPE pg_settings_autovacuum_multixact_freeze_max_age gauge\npg_settings_autovacuum_multixact_freeze_max_age 4e+08\n# HELP pg_settings_autovacuum_naptime_seconds Server Parameter: autovacuum_naptime [Units converted to seconds.]\n# TYPE pg_settings_autovacuum_naptime_seconds gauge\npg_settings_autovacuum_naptime_seconds 60\n# HELP pg_settings_autovacuum_vacuum_cost_delay_seconds Server Parameter: autovacuum_vacuum_cost_delay [Units converted to seconds.]\n# TYPE pg_settings_autovacuum_vacuum_cost_delay_seconds gauge\npg_settings_autovacuum_vacuum_cost_delay_seconds 0.002\n# HELP pg_settings_autovacuum_vacuum_cost_limit Server Parameter: autovacuum_vacuum_cost_limit\n# TYPE pg_settings_autovacuum_vacuum_cost_limit gauge\npg_settings_autovacuum_vacuum_cost_limit -1\n# HELP pg_settings_autovacuum_vacuum_insert_scale_factor Server Parameter: autovacuum_vacuum_insert_scale_factor\n# TYPE pg_settings_autovacuum_vacuum_insert_scale_factor gauge\npg_settings_autovacuum_vacuum_insert_scale_factor 0.2\n# HELP pg_settings_autovacuum_vacuum_insert_threshold Server Parameter: autovacuum_vacuum_insert_threshold\n# TYPE pg_settings_autovacuum_vacuum_insert_threshold gauge\npg_settings_autovacuum_vacuum_insert_threshold 1000\n# HELP pg_settings_autovacuum_vacuum_scale_factor Server Parameter: autovacuum_vacuum_scale_factor\n# TYPE pg_settings_autovacuum_vacuum_scale_factor gauge\npg_settings_autovacuum_vacuum_scale_factor 0.2\n# HELP pg_settings_autovacuum_vacuum_threshold Server Parameter: autovacuum_vacuum_threshold\n# TYPE pg_settings_autovacuum_vacuum_threshold gauge\npg_settings_autovacuum_vacuum_threshold 50\n# HELP pg_settings_autovacuum_work_mem_bytes Server Parameter: autovacuum_work_mem [Units converted to bytes.]\n# TYPE pg_settings_autovacuum_work_mem_bytes gauge\npg_settings_autovacuum_work_mem_bytes -1\n# HELP pg_settings_backend_flush_after_bytes Server Parameter: backend_flush_after [Units converted to bytes.]\n# TYPE pg_settings_backend_flush_after_bytes gauge\npg_settings_backend_flush_after_bytes 0\n# HELP pg_settings_bgwriter_delay_seconds Server Parameter: bgwriter_delay [Units converted to seconds.]\n# TYPE pg_settings_bgwriter_delay_seconds gauge\npg_settings_bgwriter_delay_seconds 0.2\n# HELP pg_settings_bgwriter_flush_after_bytes Server Parameter: bgwriter_flush_after [Units converted to bytes.]\n# TYPE pg_settings_bgwriter_flush_after_bytes gauge\npg_settings_bgwriter_flush_after_bytes 524288\n# HELP pg_settings_bgwriter_lru_maxpages Server Parameter: bgwriter_lru_maxpages\n# TYPE pg_settings_bgwriter_lru_maxpages gauge\npg_settings_bgwriter_lru_maxpages 100\n# HELP pg_settings_bgwriter_lru_multiplier Server Parameter: bgwriter_lru_multiplier\n# TYPE pg_settings_bgwriter_lru_multiplier gauge\npg_settings_bgwriter_lru_multiplier 2\n# HELP pg_settings_block_size Server Parameter: block_size\n# TYPE pg_settings_block_size gauge\npg_settings_block_size 8192\n# HELP pg_settings_bonjour Server Parameter: bonjour\n# TYPE pg_settings_bonjour gauge\npg_settings_bonjour 0\n# HELP pg_settings_check_function_bodies Server Parameter: check_function_bodies\n# TYPE pg_settings_check_function_bodies gauge\npg_settings_check_function_bodies1\n# HELP pg_settings_checkpoint_completion_target Server Parameter: checkpoint_completion_target\n# TYPE pg_settings_checkpoint_completion_target gauge\npg_settings_checkpoint_completion_target 0.9\n# HELP pg_settings_checkpoint_flush_after_bytes Server Parameter: checkpoint_flush_after [Units converted to bytes.]\n# TYPE pg_settings_checkpoint_flush_after_bytes gauge\npg_settings_checkpoint_flush_after_bytes 262144\n# HELP pg_settings_checkpoint_timeout_seconds Server Parameter: checkpoint_timeout [Units converted to seconds.]\n# TYPE pg_settings_checkpoint_timeout_seconds gauge\npg_settings_checkpoint_timeout_seconds 300\n# HELP pg_settings_checkpoint_warning_seconds Server Parameter: checkpoint_warning [Units converted to seconds.]\n# TYPE pg_settings_checkpoint_warning_seconds gauge\npg_settings_checkpoint_warning_seconds 30\n# HELP pg_settings_client_connection_check_interval_seconds Server Parameter: client_connection_check_interval [Units converted to seconds.]\n# TYPE pg_settings_client_connection_check_interval_seconds gauge\npg_settings_client_connection_check_interval_seconds 0\n# HELP pg_settings_commit_delay Server Parameter: commit_delay\n# TYPE pg_settings_commit_delay gauge\npg_settings_commit_delay 0\n# HELP pg_settings_commit_siblings Server Parameter: commit_siblings\n# TYPE pg_settings_commit_siblings gauge\npg_settings_commit_siblings 5\n# HELP pg_settings_cpu_index_tuple_cost Server Parameter: cpu_index_tuple_cost\n# TYPE pg_settings_cpu_index_tuple_cost gauge\npg_settings_cpu_index_tuple_cost 0.005\n# HELP pg_settings_cpu_operator_cost Server Parameter: cpu_operator_cost\n# TYPE pg_settings_cpu_operator_cost gauge\npg_settings_cpu_operator_cost 0.0025\n# HELP pg_settings_cpu_tuple_cost Server Parameter: cpu_tuple_cost\n# TYPE pg_settings_cpu_tuple_cost gauge\npg_settings_cpu_tuple_cost 0.01\n# HELP pg_settings_cursor_tuple_fraction Server Parameter: cursor_tuple_fraction\n# TYPE pg_settings_cursor_tuple_fraction gauge\npg_settings_cursor_tuple_fraction 0.1\n# HELP pg_settings_data_checksums Server Parameter: data_checksums\n# TYPE pg_settings_data_checksums gauge\npg_settings_data_checksums 0\n# HELP pg_settings_data_directory_mode Server Parameter: data_directory_mode\n# TYPE pg_settings_data_directory_mode gauge\npg_settings_data_directory_mode 700\n# HELP pg_settings_data_sync_retry Server Parameter: data_sync_retry\n# TYPE pg_settings_data_sync_retry gauge\npg_settings_data_sync_retry 0\n# HELP pg_settings_db_user_namespace Server Parameter: db_user_namespace\n# TYPE pg_settings_db_user_namespace gauge\npg_settings_db_user_namespace 0\n# HELP pg_settings_deadlock_timeout_seconds Server Parameter: deadlock_timeout [Units converted to seconds.]\n# TYPE pg_settings_deadlock_timeout_seconds gauge\npg_settings_deadlock_timeout_seconds 1\n# HELP pg_settings_debug_assertions Server Parameter: debug_assertions\n# TYPE pg_settings_debug_assertions gauge\npg_settings_debug_assertions 0\n# HELP pg_settings_debug_discard_caches Server Parameter: debug_discard_caches\n# TYPE pg_settings_debug_discard_caches gauge\npg_settings_debug_discard_caches 0\n# HELP pg_settings_debug_pretty_print Server Parameter: debug_pretty_print\n# TYPE pg_settings_debug_pretty_print gauge\npg_settings_debug_pretty_print 1\n# HELP pg_settings_debug_print_parse Server Parameter: debug_print_parse\n# TYPE pg_settings_debug_print_parse gauge\npg_settings_debug_print_parse 0\n# HELP pg_settings_debug_print_plan Server Parameter: debug_print_plan\n# TYPE pg_settings_debug_print_plan gauge\npg_settings_debug_print_plan 0\n# HELP pg_settings_debug_print_rewritten Server Parameter: debug_print_rewritten\n# TYPE pg_settings_debug_print_rewritten gauge\npg_settings_debug_print_rewritten 0\n# HELP pg_settings_default_statistics_target Server Parameter: default_statistics_target\n# TYPE pg_settings_default_statistics_target gauge\npg_settings_default_statistics_target 100\n# HELP pg_settings_default_transaction_deferrable Server Parameter: default_transaction_deferrable\n# TYPE pg_settings_default_transaction_deferrable gauge\npg_settings_default_transaction_deferrable 0\n# HELP pg_settings_default_transaction_read_only Server Parameter: default_transaction_read_only\n# TYPE pg_settings_default_transaction_read_only gauge\npg_settings_default_transaction_read_only 0\n# HELP pg_settings_effective_cache_size_bytes Server Parameter: effective_cache_size [Units converted to bytes.]\n# TYPE pg_settings_effective_cache_size_bytes gauge\npg_settings_effective_cache_size_bytes 4.294967296e+09\n# HELP pg_settings_effective_io_concurrency Server Parameter: effective_io_concurrency\n# TYPE pg_settings_effective_io_concurrency gauge\npg_settings_effective_io_concurrency 1\n# HELP pg_settings_enable_async_append Server Parameter: enable_async_append\n# TYPE pg_settings_enable_async_append gauge\npg_settings_enable_async_append 1\n# HELP pg_settings_enable_bitmapscan Server Parameter: enable_bitmapscan\n# TYPE pg_settings_enable_bitmapscan gauge\npg_settings_enable_bitmapscan 1\n# HELP pg_settings_enable_gathermerge Server Parameter: enable_gathermerge\n# TYPE pg_settings_enable_gathermerge gauge\npg_settings_enable_gathermerge 1\n# HELP pg_settings_enable_hashagg Server Parameter: enable_hashagg\n# TYPE pg_settings_enable_hashagg gauge\npg_settings_enable_hashagg 1\n# HELP pg_settings_enable_hashjoin Server Parameter: enable_hashjoin\n# TYPE pg_settings_enable_hashjoin gauge\npg_settings_enable_hashjoin 1\n# HELP pg_settings_enable_incremental_sort Server Parameter: enable_incremental_sort\n# TYPE pg_settings_enable_incremental_sort gauge\npg_settings_enable_incremental_sort 1\n# HELP pg_settings_enable_indexonlyscan Server Parameter: enable_indexonlyscan\n# TYPE pg_settings_enable_indexonlyscan gauge\npg_settings_enable_indexonlyscan 1\n# HELP pg_settings_enable_indexscan Server Parameter: enable_indexscan\n# TYPE pg_settings_enable_indexscan gauge\npg_settings_enable_indexscan 1\n# HELP pg_settings_enable_material Server Parameter: enable_material\n# TYPE pg_settings_enable_material gauge\npg_settings_enable_material 1\n# HELP pg_settings_enable_memoize Server Parameter: enable_memoize\n# TYPE pg_settings_enable_memoize gauge\npg_settings_enable_memoize 1\n# HELP pg_settings_enable_mergejoin Server Parameter: enable_mergejoin\n# TYPE pg_settings_enable_mergejoin gauge\npg_settings_enable_mergejoin 1\n# HELP pg_settings_enable_nestloop Server Parameter: enable_nestloop\n# TYPE pg_settings_enable_nestloop gauge\npg_settings_enable_nestloop 1\n# HELP pg_settings_enable_parallel_append Server Parameter: enable_parallel_append\n# TYPE pg_settings_enable_parallel_append gauge\npg_settings_enable_parallel_append 1\n# HELP pg_settings_enable_parallel_hash Server Parameter: enable_parallel_hash\n# TYPE pg_settings_enable_parallel_hash gauge\npg_settings_enable_parallel_hash 1\n# HELP pg_settings_enable_partition_pruning Server Parameter:enable_partition_pruning\n# TYPE pg_settings_enable_partition_pruning gauge\npg_settings_enable_partition_pruning 1\n# HELP pg_settings_enable_partitionwise_aggregate Server Parameter: enable_partitionwise_aggregate\n# TYPE pg_settings_enable_partitionwise_aggregate gauge\npg_settings_enable_partitionwise_aggregate 0\n# HELP pg_settings_enable_partitionwise_join Server Parameter: enable_partitionwise_join\n# TYPE pg_settings_enable_partitionwise_join gauge\npg_settings_enable_partitionwise_join 0\n# HELP pg_settings_enable_presorted_aggregate Server Parameter: enable_presorted_aggregate\n# TYPE pg_settings_enable_presorted_aggregate gauge\npg_settings_enable_presorted_aggregate 1\n# HELP pg_settings_enable_seqscan Server Parameter: enable_seqscan\n# TYPE pg_settings_enable_seqscan gauge\npg_settings_enable_seqscan 1\n# HELP pg_settings_enable_sort Server Parameter: enable_sort\n# TYPE pg_settings_enable_sort gauge\npg_settings_enable_sort 1\n# HELP pg_settings_enable_tidscanServer Parameter: enable_tidscan\n# TYPE pg_settings_enable_tidscan gauge\npg_settings_enable_tidscan 1\n# HELP pg_settings_escape_string_warning Server Parameter: escape_string_warning\n# TYPE pg_settings_escape_string_warning gauge\npg_settings_escape_string_warning 1\n# HELP pg_settings_exit_on_error Server Parameter: exit_on_error\n# TYPE pg_settings_exit_on_error gauge\npg_settings_exit_on_error 0\n# HELP pg_settings_extra_float_digits Server Parameter: extra_float_digits\n# TYPE pg_settings_extra_float_digits gauge\npg_settings_extra_float_digits 2\n# HELP pg_settings_from_collapse_limit Server Parameter: from_collapse_limit\n# TYPE pg_settings_from_collapse_limit gauge\npg_settings_from_collapse_limit 8\n# HELP pg_settings_fsync Server Parameter: fsync\n# TYPE pg_settings_fsync gauge\npg_settings_fsync 1\n# HELP pg_settings_full_page_writes Server Parameter: full_page_writes\n# TYPE pg_settings_full_page_writes gauge\npg_settings_full_page_writes 1\n# HELP pg_settings_geqo Server Parameter: geqo\n# TYPE pg_settings_geqo gauge\npg_settings_geqo 1\n# HELP pg_settings_geqo_effort Server Parameter: geqo_effort\n# TYPE pg_settings_geqo_effort gauge\npg_settings_geqo_effort 5\n# HELP pg_settings_geqo_generations Server Parameter: geqo_generations\n# TYPE pg_settings_geqo_generations gauge\npg_settings_geqo_generations 0\n# HELP pg_settings_geqo_pool_size Server Parameter: geqo_pool_size\n# TYPE pg_settings_geqo_pool_size gauge\npg_settings_geqo_pool_size 0\n#HELP pg_settings_geqo_seed Server Parameter: geqo_seed\n# TYPE pg_settings_geqo_seed gauge\npg_settings_geqo_seed 0\n# HELP pg_settings_geqo_selection_bias Server Parameter: geqo_selection_bias\n# TYPE pg_settings_geqo_selection_bias gauge\npg_settings_geqo_selection_bias 2\n# HELP pg_settings_geqo_threshold Server Parameter: geqo_threshold\n# TYPE pg_settings_geqo_threshold gauge\npg_settings_geqo_threshold 12\n# HELP pg_settings_gin_fuzzy_search_limit Server Parameter: gin_fuzzy_search_limit\n# TYPE pg_settings_gin_fuzzy_search_limit gauge\npg_settings_gin_fuzzy_search_limit 0\n# HELP pg_settings_gin_pending_list_limit_bytes Server Parameter: gin_pending_list_limit [Units converted to bytes.]\n# TYPE pg_settings_gin_pending_list_limit_bytes gauge\npg_settings_gin_pending_list_limit_bytes 4.194304e+06\n# HELP pg_settings_gss_accept_delegation Server Parameter: gss_accept_delegation\n# TYPE pg_settings_gss_accept_delegation gauge\npg_settings_gss_accept_delegation 0\n# HELP pg_settings_hash_mem_multiplier Server Parameter: hash_mem_multiplier\n# TYPE pg_settings_hash_mem_multiplier gauge\npg_settings_hash_mem_multiplier 2\n# HELP pg_settings_hot_standby Server Parameter: hot_standby\n# TYPE pg_settings_hot_standby gauge\npg_settings_hot_standby 1\n# HELP pg_settings_hot_standby_feedback Server Parameter: hot_standby_feedback\n# TYPE pg_settings_hot_standby_feedback gauge\npg_settings_hot_standby_feedback 0\n# HELP pg_settings_huge_page_size_bytes Server Parameter: huge_page_size [Units converted to bytes.]\n# TYPE pg_settings_huge_page_size_bytes gauge\npg_settings_huge_page_size_bytes 0\n# HELP pg_settings_idle_in_transaction_session_timeout_seconds Server Parameter: idle_in_transaction_session_timeout [Units converted to seconds.]\n# TYPE pg_settings_idle_in_transaction_session_timeout_seconds gauge\npg_settings_idle_in_transaction_session_timeout_seconds 0\n# HELP pg_settings_idle_session_timeout_seconds Server Parameter: idle_session_timeout[Units converted to seconds.]\n# TYPE pg_settings_idle_session_timeout_seconds gauge\npg_settings_idle_session_timeout_seconds 0\n# HELP pg_settings_ignore_checksum_failure Server Parameter: ignore_checksum_failure\n# TYPE pg_settings_ignore_checksum_failure gauge\npg_settings_ignore_checksum_failure 0\n# HELP pg_settings_ignore_invalid_pages Server Parameter: ignore_invalid_pages\n# TYPE pg_settings_ignore_invalid_pages gauge\npg_settings_ignore_invalid_pages 0\n# HELP pg_settings_ignore_system_indexes Server Parameter: ignore_system_indexes\n# TYPE pg_settings_ignore_system_indexes gauge\npg_settings_ignore_system_indexes 0\n# HELP pg_settings_in_hot_standby Server Parameter: in_hot_standby\n# TYPE pg_settings_in_hot_standby gauge\npg_settings_in_hot_standby 0\n# HELP pg_settings_integer_datetimes Server Parameter: integer_datetimes\n# TYPE pg_settings_integer_datetimes gauge\npg_settings_integer_datetimes 1\n# HELP pg_settings_jit Server Parameter: jit\n# TYPE pg_settings_jit gauge\npg_settings_jit 1\n# HELP pg_settings_jit_above_cost Server Parameter: jit_above_cost\n# TYPE pg_settings_jit_above_cost gauge\npg_settings_jit_above_cost 100000\n# HELP pg_settings_jit_debugging_support Server Parameter: jit_debugging_support\n# TYPE pg_settings_jit_debugging_support gauge\npg_settings_jit_debugging_support 0\n# HELP pg_settings_jit_dump_bitcode Server Parameter: jit_dump_bitcode\n# TYPE pg_settings_jit_dump_bitcode gauge\npg_settings_jit_dump_bitcode 0\n# HELPpg_settings_jit_expressions Server Parameter: jit_expressions\n# TYPE pg_settings_jit_expressions gauge\npg_settings_jit_expressions 1\n# HELP pg_settings_jit_inline_above_cost Server Parameter: jit_inline_above_cost\n# TYPE pg_settings_jit_inline_above_cost gauge\npg_settings_jit_inline_above_cost 500000\n# HELP pg_settings_jit_optimize_above_cost Server Parameter: jit_optimize_above_cost\n# TYPE pg_settings_jit_optimize_above_cost gauge\npg_settings_jit_optimize_above_cost 500000\n# HELPpg_settings_jit_profiling_support Server Parameter: jit_profiling_support\n# TYPE pg_settings_jit_profiling_support gauge\npg_settings_jit_profiling_support 0\n# HELP pg_settings_jit_tuple_deforming Server Parameter: jit_tuple_deforming\n# TYPE pg_settings_jit_tuple_deforming gauge\npg_settings_jit_tuple_deforming 1\n# HELP pg_settings_join_collapse_limit Server Parameter: join_collapse_limit\n# TYPE pg_settings_join_collapse_limit gauge\npg_settings_join_collapse_limit 8\n# HELP pg_settings_krb_caseins_users Server Parameter: krb_caseins_users\n# TYPE pg_settings_krb_caseins_users gauge\npg_settings_krb_caseins_users 0\n# HELP pg_settings_lo_compat_privileges Server Parameter: lo_compat_privileges\n# TYPE pg_settings_lo_compat_privileges gauge\npg_settings_lo_compat_privileges 0\n# HELP pg_settings_lock_timeout_seconds Server Parameter: lock_timeout [Units converted to seconds.]\n# TYPE pg_settings_lock_timeout_seconds gauge\npg_settings_lock_timeout_seconds 0\n# HELP pg_settings_log_autovacuum_min_duration_seconds Server Parameter: log_autovacuum_min_duration [Units converted to seconds.]\n# TYPE pg_settings_log_autovacuum_min_duration_seconds gauge\npg_settings_log_autovacuum_min_duration_seconds 600\n# HELP pg_settings_log_checkpoints Server Parameter: log_checkpoints\n# TYPE pg_settings_log_checkpoints gauge\npg_settings_log_checkpoints 1\n# HELP pg_settings_log_connections Server Parameter: log_connections\n# TYPE pg_settings_log_connections gauge\npg_settings_log_connections 0\n# HELP pg_settings_log_disconnections Server Parameter: log_disconnections\n# TYPE pg_settings_log_disconnections gauge\npg_settings_log_disconnections 0\n# HELP pg_settings_log_duration Server Parameter: log_duration\n# TYPE pg_settings_log_duration gauge\npg_settings_log_duration 0\n# HELP pg_settings_log_executor_stats Server Parameter: log_executor_stats\n# TYPE pg_settings_log_executor_stats gauge\npg_settings_log_executor_stats 0\n# HELP pg_settings_log_file_mode Server Parameter: log_file_mode\n# TYPE pg_settings_log_file_mode gauge\npg_settings_log_file_mode 600\n# HELP pg_settings_log_hostname Server Parameter: log_hostname\n# TYPE pg_settings_log_hostname gauge\npg_settings_log_hostname 0\n# HELP pg_settings_log_lock_waits Server Parameter: log_lock_waits\n# TYPE pg_settings_log_lock_waits gauge\npg_settings_log_lock_waits 0\n# HELP pg_settings_log_min_duration_sample_seconds Server Parameter: log_min_duration_sample [Units converted to seconds.]\n# TYPE pg_settings_log_min_duration_sample_seconds gauge\npg_settings_log_min_duration_sample_seconds -1\n# HELP pg_settings_log_min_duration_statement_seconds Server Parameter: log_min_duration_statement [Units converted to seconds.]\n# TYPE pg_settings_log_min_duration_statement_seconds gauge\npg_settings_log_min_duration_statement_seconds 1\n# HELP pg_settings_log_parameter_max_length_bytes Server Parameter: log_parameter_max_length [Units converted to bytes.]\n# TYPE pg_settings_log_parameter_max_length_bytes gauge\npg_settings_log_parameter_max_length_bytes -1\n# HELP pg_settings_log_parameter_max_length_on_error_bytes Server Parameter: log_parameter_max_length_on_error [Units converted to bytes.]\n# TYPE pg_settings_log_parameter_max_length_on_error_bytes gauge\npg_settings_log_parameter_max_length_on_error_bytes 0\n# HELP pg_settings_log_parser_stats Server Parameter: log_parser_stats\n# TYPE pg_settings_log_parser_stats gauge\npg_settings_log_parser_stats 0\n#HELP pg_settings_log_planner_stats Server Parameter: log_planner_stats\n# TYPE pg_settings_log_planner_stats gauge\npg_settings_log_planner_stats 0\n# HELP pg_settings_log_recovery_conflict_waits Server Parameter: log_recovery_conflict_waits\n# TYPE pg_settings_log_recovery_conflict_waits gauge\npg_settings_log_recovery_conflict_waits 0\n# HELP pg_settings_log_replication_commands Server Parameter: log_replication_commands\n# TYPE pg_settings_log_replication_commands gauge\npg_settings_log_replication_commands 0\n# HELP pg_settings_log_rotation_age_seconds Server Parameter: log_rotation_age [Units converted to seconds.]\n# TYPE pg_settings_log_rotation_age_seconds gauge\npg_settings_log_rotation_age_seconds 86400\n# HELP pg_settings_log_rotation_size_bytes Server Parameter: log_rotation_size [Units converted to bytes.]\n# TYPE pg_settings_log_rotation_size_bytes gauge\npg_settings_log_rotation_size_bytes 1.048576e+07\n# HELP pg_settings_log_startup_progress_interval_seconds Server Parameter: log_startup_progress_interval [Units converted to seconds.]\n# TYPE pg_settings_log_startup_progress_interval_seconds gauge\npg_settings_log_startup_progress_interval_seconds 10\n# HELP pg_settings_log_statement_sample_rate Server Parameter: log_statement_sample_rate\n# TYPE pg_settings_log_statement_sample_rate gauge\npg_settings_log_statement_sample_rate 1\n# HELP pg_settings_log_statement_stats Server Parameter: log_statement_stats\n# TYPE pg_settings_log_statement_stats gauge\npg_settings_log_statement_stats 0\n# HELP pg_settings_log_temp_files_bytes Server Parameter: log_temp_files [Units converted to bytes.]\n# TYPE pg_settings_log_temp_files_bytes gauge\npg_settings_log_temp_files_bytes -1\n# HELP pg_settings_log_transaction_sample_rate Server Parameter: log_transaction_sample_rate\n# TYPEpg_settings_log_transaction_sample_rate gauge\npg_settings_log_transaction_sample_rate 0\n# HELP pg_settings_log_truncate_on_rotation Server Parameter: log_truncate_on_rotation\n# TYPE pg_settings_log_truncate_on_rotation gauge\npg_settings_log_truncate_on_rotation 0\n# HELP pg_settings_logging_collector Server Parameter: logging_collector\n# TYPE pg_settings_logging_collector gauge\npg_settings_logging_collector 0\n# HELP pg_settings_logical_decoding_work_mem_bytes Server Parameter: logical_decoding_work_mem [Units converted to bytes.]\n# TYPE pg_settings_logical_decoding_work_mem_bytes gauge\npg_settings_logical_decoding_work_mem_bytes 6.7108864e+07\n# HELP pg_settings_maintenance_io_concurrency Server Parameter: maintenance_io_concurrency\n# TYPE pg_settings_maintenance_io_concurrency gauge\npg_settings_maintenance_io_concurrency 10\n# HELP pg_settings_maintenance_work_mem_bytes Server Parameter: maintenance_work_mem [Units converted to bytes.]\n# TYPE pg_settings_maintenance_work_mem_bytes gauge\npg_settings_maintenance_work_mem_bytes 6.7108864e+07\n# HELP pg_settings_max_connections Server Parameter: max_connections\n# TYPE pg_settings_max_connections gauge\npg_settings_max_connections 100\n# HELP pg_settings_max_files_per_process Server Parameter: max_files_per_process\n# TYPE pg_settings_max_files_per_process gauge\npg_settings_max_files_per_process 1000\n# HELP pg_settings_max_function_args Server Parameter: max_function_args\n# TYPE pg_settings_max_function_args gauge\npg_settings_max_function_args 100\n# HELP pg_settings_max_identifier_length Server Parameter: max_identifier_length\n# TYPE pg_settings_max_identifier_length gauge\npg_settings_max_identifier_length 63\n# HELP pg_settings_max_index_keys Server Parameter: max_index_keys\n# TYPE pg_settings_max_index_keys gauge\npg_settings_max_index_keys 32\n# HELP pg_settings_max_locks_per_transaction Server Parameter: max_locks_per_transaction\n# TYPE pg_settings_max_locks_per_transaction gauge\npg_settings_max_locks_per_transaction 64\n# HELP pg_settings_max_logical_replication_workers Server Parameter: max_logical_replication_workers\n# TYPE pg_settings_max_logical_replication_workers gauge\npg_settings_max_logical_replication_workers 4\n# HELP pg_settings_max_parallel_apply_workers_per_subscription Server Parameter: max_parallel_apply_workers_per_subscription\n# TYPE pg_settings_max_parallel_apply_workers_per_subscription gauge\npg_settings_max_parallel_apply_workers_per_subscription 2\n# HELP pg_settings_max_parallel_maintenance_workers Server Parameter: max_parallel_maintenance_workers\n# TYPE pg_settings_max_parallel_maintenance_workers gauge\npg_settings_max_parallel_maintenance_workers 2\n# HELP pg_settings_max_parallel_workers Server Parameter: max_parallel_workers\n# TYPE pg_settings_max_parallel_workers gauge\npg_settings_max_parallel_workers 8\n# HELP pg_settings_max_parallel_workers_per_gather Server Parameter: max_parallel_workers_per_gather\n#TYPE pg_settings_max_parallel_workers_per_gather gauge\npg_settings_max_parallel_workers_per_gather 2\n# HELP pg_settings_max_pred_locks_per_page Server Parameter: max_pred_locks_per_page\n# TYPE pg_settings_max_pred_locks_per_page gauge\npg_settings_max_pred_locks_per_page 2\n# HELP pg_settings_max_pred_locks_per_relation Server Parameter: max_pred_locks_per_relation\n# TYPE pg_settings_max_pred_locks_per_relation gauge\npg_settings_max_pred_locks_per_relation -2\n# HELP pg_settings_max_pred_locks_per_transaction Server Parameter: max_pred_locks_per_transaction\n# TYPE pg_settings_max_pred_locks_per_transaction gauge\npg_settings_max_pred_locks_per_transaction 64\n# HELP pg_settings_max_prepared_transactions Server Parameter: max_prepared_transactions\n# TYPE pg_settings_max_prepared_transactions gauge\npg_settings_max_prepared_transactions 0\n# HELP pg_settings_max_replication_slots Server Parameter: max_replication_slots\n# TYPE pg_settings_max_replication_slots gauge\npg_settings_max_replication_slots 10\n# HELP pg_settings_max_slot_wal_keep_size_bytes Server Parameter: max_slot_wal_keep_size [Units converted to bytes.]\n# TYPE pg_settings_max_slot_wal_keep_size_bytes gauge\npg_settings_max_slot_wal_keep_size_bytes -1\n# HELP pg_settings_max_stack_depth_bytes Server Parameter: max_stack_depth [Units converted to bytes.]\n# TYPE pg_settings_max_stack_depth_bytes gauge\npg_settings_max_stack_depth_bytes 2.097152e+06\n# HELP pg_settings_max_standby_archive_delay_seconds Server Parameter: max_standby_archive_delay [Units converted to seconds.]\n# TYPE pg_settings_max_standby_archive_delay_seconds gauge\npg_settings_max_standby_archive_delay_seconds 30\n# HELP pg_settings_max_standby_streaming_delay_seconds Server Parameter: max_standby_streaming_delay [Units converted to seconds.]\n#TYPE pg_settings_max_standby_streaming_delay_seconds gauge\npg_settings_max_standby_streaming_delay_seconds 30\n# HELP pg_settings_max_sync_workers_per_subscriptionServer Parameter: max_sync_workers_per_subscription\n# TYPE pg_settings_max_sync_workers_per_subscription gauge\npg_settings_max_sync_workers_per_subscription 2\n# HELP pg_settings_max_wal_senders Server Parameter: max_wal_senders\n# TYPE pg_settings_max_wal_senders gauge\npg_settings_max_wal_senders 10\n# HELP pg_settings_max_wal_size_bytes Server Parameter: max_wal_size [Units converted to bytes.]\n# TYPE pg_settings_max_wal_size_bytes gauge\npg_settings_max_wal_size_bytes 1.073741824e+09\n# HELP pg_settings_max_worker_processes Server Parameter: max_worker_processes\n# TYPE pg_settings_max_worker_processes gauge\npg_settings_max_worker_processes 8\n# HELP pg_settings_min_dynamic_shared_memory_bytes Server Parameter: min_dynamic_shared_memory [Units converted to bytes.]\n# TYPE pg_settings_min_dynamic_shared_memory_bytes gauge\npg_settings_min_dynamic_shared_memory_bytes 0\n# HELP pg_settings_min_parallel_index_scan_size_bytes Server Parameter: min_parallel_index_scan_size[Units converted to bytes.]\n# TYPE pg_settings_min_parallel_index_scan_size_bytes gauge\npg_settings_min_parallel_index_scan_size_bytes 524288\n# HELP pg_settings_min_parallel_table_scan_size_bytes Server Parameter: min_parallel_table_scan_size [Units converted to bytes.]\n# TYPE pg_settings_min_parallel_table_scan_size_bytes gauge\npg_settings_min_parallel_table_scan_size_bytes 8.388608e+06\n# HELP pg_settings_min_wal_size_bytes Server Parameter: min_wal_size [Units converted to bytes.]\n# TYPE pg_settings_min_wal_size_bytes gauge\npg_settings_min_wal_size_bytes 8.388608e+07\n# HELP pg_settings_old_snapshot_threshold_seconds Server Parameter: old_snapshot_threshold [Units converted to seconds.]\n# TYPE pg_settings_old_snapshot_threshold_seconds gauge\npg_settings_old_snapshot_threshold_seconds -1\n# HELP pg_settings_parallel_leader_participation Server Parameter: parallel_leader_participation\n# TYPE pg_settings_parallel_leader_participation gauge\npg_settings_parallel_leader_participation 1\n# HELP pg_settings_parallel_setup_cost Server Parameter: parallel_setup_cost\n# TYPE pg_settings_parallel_setup_cost gauge\npg_settings_parallel_setup_cost 1000\n# HELP pg_settings_parallel_tuple_cost Server Parameter: parallel_tuple_cost\n# TYPE pg_settings_parallel_tuple_cost gauge\npg_settings_parallel_tuple_cost 0.1\n# HELP pg_settings_port Server Parameter: port\n# TYPE pg_settings_port gauge\npg_settings_port 5432\n# HELP pg_settings_post_auth_delay_seconds ServerParameter: post_auth_delay [Units converted to seconds.]\n# TYPE pg_settings_post_auth_delay_seconds gauge\npg_settings_post_auth_delay_seconds 0\n# HELP pg_settings_pre_auth_delay_seconds Server Parameter: pre_auth_delay [Units converted to seconds.]\n# TYPE pg_settings_pre_auth_delay_seconds gauge\npg_settings_pre_auth_delay_seconds 0\n# HELP pg_settings_quote_all_identifiers Server Parameter: quote_all_identifiers\n# TYPE pg_settings_quote_all_identifiers gauge\npg_settings_quote_all_identifiers 0\n# HELP pg_settings_random_page_cost Server Parameter: random_page_cost\n# TYPE pg_settings_random_page_cost gauge\npg_settings_random_page_cost 4\n# HELP pg_settings_recovery_min_apply_delay_seconds Server Parameter: recovery_min_apply_delay [Units converted to seconds.]\n# TYPE pg_settings_recovery_min_apply_delay_seconds gauge\npg_settings_recovery_min_apply_delay_seconds 0\n# HELP pg_settings_recovery_target_inclusive Server Parameter: recovery_target_inclusive\n# TYPE pg_settings_recovery_target_inclusive gauge\npg_settings_recovery_target_inclusive 1\n# HELP pg_settings_recursive_worktable_factor Server Parameter: recursive_worktable_factor\n# TYPE pg_settings_recursive_worktable_factor gauge\npg_settings_recursive_worktable_factor 10\n# HELP pg_settings_remove_temp_files_after_crash Server Parameter: remove_temp_files_after_crash\n# TYPE pg_settings_remove_temp_files_after_crash gauge\npg_settings_remove_temp_files_after_crash 1\n# HELP pg_settings_reserved_connections Server Parameter: reserved_connections\n# TYPE pg_settings_reserved_connections gauge\npg_settings_reserved_connections 0\n# HELP pg_settings_restart_after_crash Server Parameter: restart_after_crash\n# TYPE pg_settings_restart_after_crash gauge\npg_settings_restart_after_crash 1\n# HELP pg_settings_row_security Server Parameter: row_security\n# TYPE pg_settings_row_security gauge\npg_settings_row_security 1\n# HELP pg_settings_scram_iterations Server Parameter: scram_iterations\n# TYPE pg_settings_scram_iterations gauge\npg_settings_scram_iterations 4096\n# HELP pg_settings_segment_size_bytes Server Parameter: segment_size [Units converted to bytes.]\n# TYPE pg_settings_segment_size_bytes gauge\npg_settings_segment_size_bytes 1.073741824e+09\n# HELP pg_settings_send_abort_for_crash Server Parameter: send_abort_for_crash\n# TYPE pg_settings_send_abort_for_crash gauge\npg_settings_send_abort_for_crash 0\n# HELP pg_settings_send_abort_for_kill Server Parameter: send_abort_for_kill\n# TYPE pg_settings_send_abort_for_kill gauge\npg_settings_send_abort_for_kill 0\n# HELP pg_settings_seq_page_cost Server Parameter: seq_page_cost\n# TYPE pg_settings_seq_page_cost gauge\npg_settings_seq_page_cost 1\n# HELP pg_settings_server_version_num Server Parameter: server_version_num\n# TYPE pg_settings_server_version_num gauge\npg_settings_server_version_num 160015\n# HELP pg_settings_shared_buffers_bytes Server Parameter: shared_buffers [Units converted to bytes.]\n# TYPE pg_settings_shared_buffers_bytes gauge\npg_settings_shared_buffers_bytes 1.34217728e+08\n# HELP pg_settings_shared_memory_size_bytes Server Parameter: shared_memory_size [Units converted to bytes.]\n# TYPE pg_settings_shared_memory_size_bytes gauge\npg_settings_shared_memory_size_bytes 1.49946368e+08\n# HELP pg_settings_shared_memory_size_in_huge_pages Server Parameter: shared_memory_size_in_huge_pages\n# TYPE pg_settings_shared_memory_size_in_huge_pages gauge\npg_settings_shared_memory_size_in_huge_pages 72\n# HELP pg_settings_ssl Server Parameter: ssl\n# TYPE pg_settings_ssl gauge\npg_settings_ssl 0\n# HELP pg_settings_ssl_passphrase_command_supports_reload Server Parameter: ssl_passphrase_command_supports_reload\n# TYPE pg_settings_ssl_passphrase_command_supports_reload gauge\npg_settings_ssl_passphrase_command_supports_reload 0\n# HELP pg_settings_ssl_prefer_server_ciphers Server Parameter: ssl_prefer_server_ciphers\n# TYPE pg_settings_ssl_prefer_server_ciphers gauge\npg_settings_ssl_prefer_server_ciphers 1\n# HELP pg_settings_standard_conforming_strings Server Parameter: standard_conforming_strings\n# TYPE pg_settings_standard_conforming_strings gauge\npg_settings_standard_conforming_strings 1\n# HELP pg_settings_statement_timeout_seconds Server Parameter: statement_timeout [Units converted to seconds.]\n# TYPE pg_settings_statement_timeout_seconds gauge\npg_settings_statement_timeout_seconds 0\n# HELP pg_settings_superuser_reserved_connections Server Parameter: superuser_reserved_connections\n# TYPE pg_settings_superuser_reserved_connections gauge\npg_settings_superuser_reserved_connections 3\n# HELP pg_settings_synchronize_seqscans Server Parameter: synchronize_seqscans\n# TYPE pg_settings_synchronize_seqscans gauge\npg_settings_synchronize_seqscans 1\n# HELP pg_settings_syslog_sequence_numbers Server Parameter: syslog_sequence_numbers\n# TYPE pg_settings_syslog_sequence_numbers gauge\npg_settings_syslog_sequence_numbers 1\n# HELP pg_settings_syslog_split_messages Server Parameter: syslog_split_messages\n# TYPE pg_settings_syslog_split_messages gauge\npg_settings_syslog_split_messages 1\n# HELP pg_settings_tcp_keepalives_count Server Parameter: tcp_keepalives_count\n# TYPE pg_settings_tcp_keepalives_count gauge\npg_settings_tcp_keepalives_count 0\n# HELP pg_settings_tcp_keepalives_idle_seconds Server Parameter: tcp_keepalives_idle [Units converted to seconds.]\n# TYPE pg_settings_tcp_keepalives_idle_seconds gauge\npg_settings_tcp_keepalives_idle_seconds 0\n# HELP pg_settings_tcp_keepalives_interval_seconds Server Parameter: tcp_keepalives_interval [Units converted to seconds.]\n# TYPE pg_settings_tcp_keepalives_interval_seconds gauge\npg_settings_tcp_keepalives_interval_seconds 0\n# HELP pg_settings_tcp_user_timeout_seconds Server Parameter: tcp_user_timeout [Units converted to seconds.]\n# TYPE pg_settings_tcp_user_timeout_seconds gauge\npg_settings_tcp_user_timeout_seconds 0\n# HELP pg_settings_temp_buffers_bytes Server Parameter: temp_buffers [Units converted to bytes.]\n# TYPE pg_settings_temp_buffers_bytes gauge\npg_settings_temp_buffers_bytes 8.388608e+06\n#HELP pg_settings_temp_file_limit_bytes Server Parameter: temp_file_limit [Units converted to bytes.]\n# TYPE pg_settings_temp_file_limit_bytes gauge\npg_settings_temp_file_limit_bytes -1\n# HELP pg_settings_trace_notify Server Parameter: trace_notify\n# TYPE pg_settings_trace_notify gauge\npg_settings_trace_notify 0\n# HELP pg_settings_trace_sort Server Parameter: trace_sort\n# TYPE pg_settings_trace_sort gauge\npg_settings_trace_sort 0\n# HELP pg_settings_track_activities Server Parameter: track_activities\n# TYPE pg_settings_track_activities gauge\npg_settings_track_activities 1\n# HELP pg_settings_track_activity_query_size_bytes Server Parameter: track_activity_query_size [Units converted to bytes.]\n# TYPE pg_settings_track_activity_query_size_bytes gauge\npg_settings_track_activity_query_size_bytes 1024\n# HELP pg_settings_track_commit_timestamp Server Parameter: track_commit_timestamp\n# TYPE pg_settings_track_commit_timestamp gauge\npg_settings_track_commit_timestamp 0\n# HELP pg_settings_track_counts Server Parameter: track_counts\n# TYPE pg_settings_track_counts gauge\npg_settings_track_counts 1\n# HELP pg_settings_track_io_timing Server Parameter: track_io_timing\n# TYPE pg_settings_track_io_timing gauge\npg_settings_track_io_timing 0\n# HELP pg_settings_track_wal_io_timing Server Parameter: track_wal_io_timing\n# TYPE pg_settings_track_wal_io_timing gauge\npg_settings_track_wal_io_timing 0\n# HELP pg_settings_transaction_deferrable Server Parameter:transaction_deferrable\n# TYPE pg_settings_transaction_deferrable gauge\npg_settings_transaction_deferrable 0\n# HELP pg_settings_transaction_read_only Server Parameter: transaction_read_only\n# TYPE pg_settings_transaction_read_only gauge\npg_settings_transaction_read_only 0\n# HELP pg_settings_transform_null_equals Server Parameter: transform_null_equals\n# TYPE pg_settings_transform_null_equals gauge\npg_settings_transform_null_equals 0\n# HELP pg_settings_unix_socket_permissions ServerParameter: unix_socket_permissions\n# TYPE pg_settings_unix_socket_permissions gauge\npg_settings_unix_socket_permissions 777\n# HELP pg_settings_update_process_title Server Parameter: update_process_title\n# TYPE pg_settings_update_process_title gauge\npg_settings_update_process_title 1\n# HELP pg_settings_vacuum_buffer_usage_limit_bytes Server Parameter: vacuum_buffer_usage_limit [Units converted to bytes.]\n# TYPE pg_settings_vacuum_buffer_usage_limit_bytes gauge\npg_settings_vacuum_buffer_usage_limit_bytes 262144\n# HELP pg_settings_vacuum_cost_delay_seconds Server Parameter: vacuum_cost_delay [Units converted to seconds.]\n# TYPE pg_settings_vacuum_cost_delay_seconds gauge\npg_settings_vacuum_cost_delay_seconds 0\n# HELP pg_settings_vacuum_cost_limit Server Parameter: vacuum_cost_limit\n# TYPE pg_settings_vacuum_cost_limit gauge\npg_settings_vacuum_cost_limit 200\n# HELP pg_settings_vacuum_cost_page_dirty Server Parameter: vacuum_cost_page_dirty\n# TYPE pg_settings_vacuum_cost_page_dirty gauge\npg_settings_vacuum_cost_page_dirty 20\n# HELP pg_settings_vacuum_cost_page_hit Server Parameter: vacuum_cost_page_hit\n# TYPE pg_settings_vacuum_cost_page_hit gauge\npg_settings_vacuum_cost_page_hit 1\n# HELP pg_settings_vacuum_cost_page_miss Server Parameter: vacuum_cost_page_miss\n# TYPE pg_settings_vacuum_cost_page_miss gauge\npg_settings_vacuum_cost_page_miss 2\n# HELP pg_settings_vacuum_failsafe_age Server Parameter: vacuum_failsafe_age\n# TYPE pg_settings_vacuum_failsafe_age gauge\npg_settings_vacuum_failsafe_age 1.6e+09\n# HELP pg_settings_vacuum_freeze_min_age Server Parameter: vacuum_freeze_min_age\n# TYPE pg_settings_vacuum_freeze_min_age gauge\npg_settings_vacuum_freeze_min_age 5e+07\n# HELP pg_settings_vacuum_freeze_table_age Server Parameter: vacuum_freeze_table_age\n# TYPE pg_settings_vacuum_freeze_table_age gauge\npg_settings_vacuum_freeze_table_age 1.5e+08\n# HELP pg_settings_vacuum_multixact_failsafe_age Server Parameter: vacuum_multixact_failsafe_age\n# TYPE pg_settings_vacuum_multixact_failsafe_age gauge\npg_settings_vacuum_multixact_failsafe_age 1.6e+09\n# HELP pg_settings_vacuum_multixact_freeze_min_age Server Parameter: vacuum_multixact_freeze_min_age\n# TYPE pg_settings_vacuum_multixact_freeze_min_age gauge\npg_settings_vacuum_multixact_freeze_min_age5e+06\n# HELP pg_settings_vacuum_multixact_freeze_table_age Server Parameter: vacuum_multixact_freeze_table_age\n# TYPE pg_settings_vacuum_multixact_freeze_table_age gauge\npg_settings_vacuum_multixact_freeze_table_age 1.5e+08\n# HELP pg_settings_wal_block_size Server Parameter: wal_block_size\n# TYPE pg_settings_wal_block_sizegauge\npg_settings_wal_block_size 8192\n# HELP pg_settings_wal_buffers_bytes Server Parameter: wal_buffers [Units converted to bytes.]\n# TYPE pg_settings_wal_buffers_bytes gauge\npg_settings_wal_buffers_bytes 4.194304e+06\n# HELP pg_settings_wal_decode_buffer_size_bytes Server Parameter: wal_decode_buffer_size [Units convertedto bytes.]\n# TYPE pg_settings_wal_decode_buffer_size_bytes gauge\npg_settings_wal_decode_buffer_size_bytes 524288\n# HELP pg_settings_wal_init_zero Server Parameter: wal_init_zero\n# TYPE pg_settings_wal_init_zero gauge\npg_settings_wal_init_zero 1\n# HELP pg_settings_wal_keep_size_bytes Server Parameter: wal_keep_size [Units converted to bytes.]\n# TYPE pg_settings_wal_keep_size_bytes gauge\npg_settings_wal_keep_size_bytes 0\n# HELP pg_settings_wal_log_hints Server Parameter: wal_log_hints\n# TYPE pg_settings_wal_log_hints gauge\npg_settings_wal_log_hints 0\n# HELP pg_settings_wal_receiver_create_temp_slot Server Parameter: wal_receiver_create_temp_slot\n# TYPE pg_settings_wal_receiver_create_temp_slot gauge\npg_settings_wal_receiver_create_temp_slot 0\n# HELP pg_settings_wal_receiver_status_interval_seconds Server Parameter: wal_receiver_status_interval [Units converted to seconds.]\n# TYPE pg_settings_wal_receiver_status_interval_seconds gauge\npg_settings_wal_receiver_status_interval_seconds 10\n# HELP pg_settings_wal_receiver_timeout_seconds Server Parameter: wal_receiver_timeout [Units converted to seconds.]\n# TYPE pg_settings_wal_receiver_timeout_seconds gauge\npg_settings_wal_receiver_timeout_seconds 60\n# HELP pg_settings_wal_recycle Server Parameter: wal_recycle\n# TYPE pg_settings_wal_recycle gauge\npg_settings_wal_recycle 1\n# HELP pg_settings_wal_retrieve_retry_interval_seconds Server Parameter: wal_retrieve_retry_interval [Units converted to seconds.]\n# TYPE pg_settings_wal_retrieve_retry_interval_seconds gauge\npg_settings_wal_retrieve_retry_interval_seconds 5\n# HELP pg_settings_wal_segment_size_bytes Server Parameter: wal_segment_size [Units converted to bytes.]\n# TYPE pg_settings_wal_segment_size_bytes gauge\npg_settings_wal_segment_size_bytes 1.6777216e+07\n# HELP pg_settings_wal_sender_timeout_seconds Server Parameter: wal_sender_timeout [Units converted to seconds.]\n# TYPE pg_settings_wal_sender_timeout_seconds gauge\npg_settings_wal_sender_timeout_seconds 60\n# HELP pg_settings_wal_skip_threshold_bytes Server Parameter: wal_skip_threshold [Units converted to bytes.]\n# TYPE pg_settings_wal_skip_threshold_bytes gauge\npg_settings_wal_skip_threshold_bytes 2.097152e+06\n# HELP pg_settings_wal_writer_delay_seconds Server Parameter: wal_writer_delay [Units converted to seconds.]\n# TYPE pg_settings_wal_writer_delay_seconds gauge\npg_settings_wal_writer_delay_seconds 0.2\n# HELP pg_settings_wal_writer_flush_after_bytes Server Parameter: wal_writer_flush_after [Units converted to bytes.]\n# TYPE pg_settings_wal_writer_flush_after_bytes gauge\npg_settings_wal_writer_flush_after_bytes 1.048576e+06\n# HELP pg_settings_work_mem_bytes Server Parameter: work_mem [Units converted to bytes.]\n# TYPE pg_settings_work_mem_bytes gauge\npg_settings_work_mem_bytes 4.194304e+06\n# HELP pg_settings_zero_damaged_pages Server Parameter: zero_damaged_pages\n# TYPE pg_settings_zero_damaged_pages gauge\npg_settings_zero_damaged_pages 0\n# HELP pg_stat_activity_count number of connections in this state\n# TYPE pg_stat_activity_count gauge\npg_stat_activity_count{application_name=\"\",backend_type=\"\",datname=\"app_db\",state=\"active\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_count{application_name=\"\",backend_type=\"\",datname=\"app_db\",state=\"disabled\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_count{application_name=\"\",backend_type=\"\",datname=\"app_db\",state=\"fastpath function call\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_count{application_name=\"\",backend_type=\"\",datname=\"app_db\",state=\"idle\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_count{application_name=\"\",backend_type=\"\",datname=\"app_db\",state=\"idle in transaction\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_count{application_name=\"\",backend_type=\"\",datname=\"app_db\",state=\"idle in transaction (aborted)\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_count{application_name=\"\",backend_type=\"\",datname=\"postgres\",state=\"active\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_count{application_name=\"\",backend_type=\"\",datname=\"postgres\",state=\"disabled\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_count{application_name=\"\",backend_type=\"\",datname=\"postgres\",state=\"fastpath function call\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_count{application_name=\"\",backend_type=\"\",datname=\"postgres\",state=\"idle in transaction\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_count{application_name=\"\",backend_type=\"\",datname=\"postgres\",state=\"idle in transaction (aborted)\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_count{application_name=\"\",backend_type=\"\",datname=\"template0\",state=\"active\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_count{application_name=\"\",backend_type=\"\",datname=\"template0\",state=\"disabled\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_count{application_name=\"\",backend_type=\"\",datname=\"template0\",state=\"fastpath function call\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_count{application_name=\"\",backend_type=\"\",datname=\"template0\",state=\"idle\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_count{application_name=\"\",backend_type=\"\",datname=\"template0\",state=\"idle in transaction\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_count{application_name=\"\",backend_type=\"\",datname=\"template0\",state=\"idle in transaction (aborted)\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_count{application_name=\"\",backend_type=\"\",datname=\"template1\",state=\"active\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_count{application_name=\"\",backend_type=\"\",datname=\"template1\",state=\"disabled\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_count{application_name=\"\",backend_type=\"\",datname=\"template1\",state=\"fastpath function call\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_count{application_name=\"\",backend_type=\"\",datname=\"template1\",state=\"idle\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_count{application_name=\"\",backend_type=\"\",datname=\"template1\",state=\"idle in transaction\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_count{application_name=\"\",backend_type=\"\",datname=\"template1\",state=\"idle in transaction (aborted)\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_count{application_name=\"\",backend_type=\"client backend\",datname=\"postgres\",state=\"idle\",usename=\"postgres_exporter\",wait_event=\"ClientRead\",wait_event_type=\"Client\"} 1\n# HELP pg_stat_activity_max_tx_duration max duration in seconds any active transaction has been running\n# TYPE pg_stat_activity_max_tx_duration gauge\npg_stat_activity_max_tx_duration{application_name=\"\",backend_type=\"\",datname=\"app_db\",state=\"active\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_max_tx_duration{application_name=\"\",backend_type=\"\",datname=\"app_db\",state=\"disabled\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_max_tx_duration{application_name=\"\",backend_type=\"\",datname=\"app_db\",state=\"fastpath function call\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_max_tx_duration{application_name=\"\",backend_type=\"\",datname=\"app_db\",state=\"idle\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_max_tx_duration{application_name=\"\",backend_type=\"\",datname=\"app_db\",state=\"idle in transaction\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_max_tx_duration{application_name=\"\",backend_type=\"\",datname=\"app_db\",state=\"idle in transaction (aborted)\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_max_tx_duration{application_name=\"\",backend_type=\"\",datname=\"postgres\",state=\"active\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_max_tx_duration{application_name=\"\",backend_type=\"\",datname=\"postgres\",state=\"disabled\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_max_tx_duration{application_name=\"\",backend_type=\"\",datname=\"postgres\",state=\"fastpath function call\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_max_tx_duration{application_name=\"\",backend_type=\"\",datname=\"postgres\",state=\"idle in transaction\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_max_tx_duration{application_name=\"\",backend_type=\"\",datname=\"postgres\",state=\"idle in transaction (aborted)\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_max_tx_duration{application_name=\"\",backend_type=\"\",datname=\"template0\",state=\"active\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_max_tx_duration{application_name=\"\",backend_type=\"\",datname=\"template0\",state=\"disabled\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_max_tx_duration{application_name=\"\",backend_type=\"\",datname=\"template0\",state=\"fastpath function call\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_max_tx_duration{application_name=\"\",backend_type=\"\",datname=\"template0\",state=\"idle\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_max_tx_duration{application_name=\"\",backend_type=\"\",datname=\"template0\",state=\"idle in transaction\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_max_tx_duration{application_name=\"\",backend_type=\"\",datname=\"template0\",state=\"idle in transaction (aborted)\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_max_tx_duration{application_name=\"\",backend_type=\"\",datname=\"template1\",state=\"active\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_max_tx_duration{application_name=\"\",backend_type=\"\",datname=\"template1\",state=\"disabled\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_max_tx_duration{application_name=\"\",backend_type=\"\",datname=\"template1\",state=\"fastpath function call\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_max_tx_duration{application_name=\"\",backend_type=\"\",datname=\"template1\",state=\"idle\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_max_tx_duration{application_name=\"\",backend_type=\"\",datname=\"template1\",state=\"idle in transaction\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_max_tx_duration{application_name=\"\",backend_type=\"\",datname=\"template1\",state=\"idle in transaction (aborted)\",usename=\"\",wait_event=\"\",wait_event_type=\"\"} 0\npg_stat_activity_max_tx_duration{application_name=\"\",backend_type=\"client backend\",datname=\"postgres\",state=\"idle\",usename=\"postgres_exporter\",wait_event=\"ClientRead\",wait_event_type=\"Client\"} 0\n# HELP pg_stat_archiver_archived_count Number of WAL files that have been successfully archived\n# TYPE pg_stat_archiver_archived_count counter\npg_stat_archiver_archived_count 0\n# HELP pg_stat_archiver_failed_count Number of failed attempts for archiving WAL files\n# TYPE pg_stat_archiver_failed_count counter\npg_stat_archiver_failed_count 0\n# HELP pg_stat_bgwriter_buffers_alloc_total Number of buffers allocated\n# TYPE pg_stat_bgwriter_buffers_alloc_total counter\npg_stat_bgwriter_buffers_alloc_total 2262\n# HELP pg_stat_bgwriter_buffers_backend_fsync_total Number of times a backend had to execute its own fsync call (normally the background writer handles those even when the backend does its own write)\n# TYPE pg_stat_bgwriter_buffers_backend_fsync_total counter\npg_stat_bgwriter_buffers_backend_fsync_total 0\n# HELP pg_stat_bgwriter_buffers_backend_total Number of buffers written directly by a backend\n# TYPE pg_stat_bgwriter_buffers_backend_total counter\npg_stat_bgwriter_buffers_backend_total 304\n# HELP pg_stat_bgwriter_buffers_checkpoint_total Number of buffers written during checkpoints\n# TYPE pg_stat_bgwriter_buffers_checkpoint_total counter\npg_stat_bgwriter_buffers_checkpoint_total 984\n# HELP pg_stat_bgwriter_buffers_clean_total Number of buffers written by the background writer\n# TYPE pg_stat_bgwriter_buffers_clean_total counter\npg_stat_bgwriter_buffers_clean_total 0\n# HELP pg_stat_bgwriter_checkpoint_sync_time_total Total amount of time that has been spent in the portion of checkpoint processing where files are synchronized to disk, in milliseconds\n#TYPE pg_stat_bgwriter_checkpoint_sync_time_total counter\npg_stat_bgwriter_checkpoint_sync_time_total 38\n# HELP pg_stat_bgwriter_checkpoint_write_time_total Total amount of time that has been spent in the portion of checkpoint processing where files are written to disk, in milliseconds\n# TYPE pg_stat_bgwriter_checkpoint_write_time_total counter\npg_stat_bgwriter_checkpoint_write_time_total 98736\n# HELP pg_stat_bgwriter_checkpoints_req_total Number of requested checkpoints that have beenperformed\n# TYPE pg_stat_bgwriter_checkpoints_req_total counter\npg_stat_bgwriter_checkpoints_req_total 1\n# HELP pg_stat_bgwriter_checkpoints_timed_total Number of scheduled checkpoints that have been performed\n# TYPE pg_stat_bgwriter_checkpoints_timed_total counter\npg_stat_bgwriter_checkpoints_timed_total 14\n# HELP pg_stat_bgwriter_maxwritten_clean_total Number of times the background writer stopped a cleaning scan because it had written too many buffers\n# TYPE pg_stat_bgwriter_maxwritten_clean_total counter\npg_stat_bgwriter_maxwritten_clean_total 0\n# HELP pg_stat_bgwriter_stats_reset_total Time at which these statistics were last reset\n# TYPE pg_stat_bgwriter_stats_reset_total counter\npg_stat_bgwriter_stats_reset_total 1.792916034e+09\n# HELP pg_stat_database_active_time_seconds_total Time spent executing SQL statements in this database, in seconds\n# TYPE pg_stat_database_active_time_seconds_total counter\npg_stat_database_active_time_seconds_total{datid=\"1\",datname=\"template1\"} 0\npg_stat_database_active_time_seconds_total{datid=\"16389\",datname=\"app_db\"} 0\npg_stat_database_active_time_seconds_total{datid=\"4\",datname=\"template0\"} 0\npg_stat_database_active_time_seconds_total{datid=\"5\",datname=\"postgres\"} 0.102181\n# HELP pg_stat_database_blk_read_time Time spent reading data file blocks by backends in this database, in milliseconds\n# TYPE pg_stat_database_blk_read_time counter\npg_stat_database_blk_read_time{datid=\"1\",datname=\"template1\"} 0\npg_stat_database_blk_read_time{datid=\"16389\",datname=\"app_db\"} 0\npg_stat_database_blk_read_time{datid=\"4\",datname=\"template0\"} 0\npg_stat_database_blk_read_time{datid=\"5\",datname=\"postgres\"} 0\n# HELP pg_stat_database_blk_write_time Time spent writing data file blocks by backends in this database, in milliseconds\n# TYPE pg_stat_database_blk_write_time counter\npg_stat_database_blk_write_time{datid=\"1\",datname=\"template1\"} 0\npg_stat_database_blk_write_time{datid=\"16389\",datname=\"app_db\"} 0\npg_stat_database_blk_write_time{datid=\"4\",datname=\"template0\"} 0\npg_stat_database_blk_write_time{datid=\"5\",datname=\"postgres\"} 0\n# HELP pg_stat_database_blks_hit Number of times disk blocks were found already in the buffer cache, so that a read was not necessary (this only includes hits in the PostgreSQL buffer cache, not the operating system's file system cache)\n# TYPE pg_stat_database_blks_hit counter\npg_stat_database_blks_hit{datid=\"1\",datname=\"template1\"} 100278\npg_stat_database_blks_hit{datid=\"16389\",datname=\"app_db\"} 0\npg_stat_database_blks_hit{datid=\"4\",datname=\"template0\"} 0\npg_stat_database_blks_hit{datid=\"5\",datname=\"postgres\"} 13915\n# HELP pg_stat_database_blks_read Number of disk blocks read in this database\n# TYPE pg_stat_database_blks_read counter\npg_stat_database_blks_read{datid=\"1\",datname=\"template1\"} 893\npg_stat_database_blks_read{datid=\"16389\",datname=\"app_db\"} 0\npg_stat_database_blks_read{datid=\"4\",datname=\"template0\"} 0\npg_stat_database_blks_read{datid=\"5\",datname=\"postgres\"} 251\n# HELP pg_stat_database_conflicts Number of queries canceled due to conflicts with recovery in this database. (Conflicts occur only on standby servers; see pg_stat_database_conflicts for details.)\n# TYPE pg_stat_database_conflicts counter\npg_stat_database_conflicts{datid=\"1\",datname=\"template1\"} 0\npg_stat_database_conflicts{datid=\"16389\",datname=\"app_db\"} 0\npg_stat_database_conflicts{datid=\"4\",datname=\"template0\"} 0\npg_stat_database_conflicts{datid=\"5\",datname=\"postgres\"} 0\n# HELP pg_stat_database_conflicts_confl_active_logicalslot Unknown metric from pg_stat_database_conflicts\n# TYPE pg_stat_database_conflicts_confl_active_logicalslot untyped\npg_stat_database_conflicts_confl_active_logicalslot{datid=\"1\",datname=\"template1\",server=\"/var/run/postgresql:5432\"} 0\npg_stat_database_conflicts_confl_active_logicalslot{datid=\"16389\",datname=\"app_db\",server=\"/var/run/postgresql:5432\"} 0\npg_stat_database_conflicts_confl_active_logicalslot{datid=\"4\",datname=\"template0\",server=\"/var/run/postgresql:5432\"} 0\npg_stat_database_conflicts_confl_active_logicalslot{datid=\"5\",datname=\"postgres\",server=\"/var/run/postgresql:5432\"} 0\n# HELP pg_stat_database_conflicts_confl_bufferpin Number of queries in this database that have been canceled due to pinned buffers\n# TYPE pg_stat_database_conflicts_confl_bufferpin counter\npg_stat_database_conflicts_confl_bufferpin{datid=\"1\",datname=\"template1\",server=\"/var/run/postgresql:5432\"} 0\npg_stat_database_conflicts_confl_bufferpin{datid=\"16389\",datname=\"app_db\",server=\"/var/run/postgresql:5432\"} 0\npg_stat_database_conflicts_confl_bufferpin{datid=\"4\",datname=\"template0\",server=\"/var/run/postgresql:5432\"} 0\npg_stat_database_conflicts_confl_bufferpin{datid=\"5\",datname=\"postgres\",server=\"/var/run/postgresql:5432\"} 0\n# HELP pg_stat_database_conflicts_confl_deadlock Number of queries in this database that have been canceled due to deadlocks\n# TYPE pg_stat_database_conflicts_confl_deadlock counter\npg_stat_database_conflicts_confl_deadlock{datid=\"1\",datname=\"template1\",server=\"/var/run/postgresql:5432\"} 0\npg_stat_database_conflicts_confl_deadlock{datid=\"16389\",datname=\"app_db\",server=\"/var/run/postgresql:5432\"} 0\npg_stat_database_conflicts_confl_deadlock{datid=\"4\",datname=\"template0\",server=\"/var/run/postgresql:5432\"} 0\npg_stat_database_conflicts_confl_deadlock{datid=\"5\",datname=\"postgres\",server=\"/var/run/postgresql:5432\"} 0\n# HELP pg_stat_database_conflicts_confl_lock Number of queries in this database that have been canceled due to lock timeouts\n# TYPE pg_stat_database_conflicts_confl_lock counter\npg_stat_database_conflicts_confl_lock{datid=\"1\",datname=\"template1\",server=\"/var/run/postgresql:5432\"} 0\npg_stat_database_conflicts_confl_lock{datid=\"16389\",datname=\"app_db\",server=\"/var/run/postgresql:5432\"} 0\npg_stat_database_conflicts_confl_lock{datid=\"4\",datname=\"template0\",server=\"/var/run/postgresql:5432\"} 0\npg_stat_database_conflicts_confl_lock{datid=\"5\",datname=\"postgres\",server=\"/var/run/postgresql:5432\"} 0\n# HELP pg_stat_database_conflicts_confl_snapshot Number of queries in this database that have been canceled due to old snapshots\n# TYPE pg_stat_database_conflicts_confl_snapshot counter\npg_stat_database_conflicts_confl_snapshot{datid=\"1\",datname=\"template1\",server=\"/var/run/postgresql:5432\"} 0\npg_stat_database_conflicts_confl_snapshot{datid=\"16389\",datname=\"app_db\",server=\"/var/run/postgresql:5432\"} 0\npg_stat_database_conflicts_confl_snapshot{datid=\"4\",datname=\"template0\",server=\"/var/run/postgresql:5432\"} 0\npg_stat_database_conflicts_confl_snapshot{datid=\"5\",datname=\"postgres\",server=\"/var/run/postgresql:5432\"} 0\n# HELP pg_stat_database_conflicts_confl_tablespace Number of queries in this database that have been canceled due to dropped tablespaces\n# TYPE pg_stat_database_conflicts_confl_tablespace counter\npg_stat_database_conflicts_confl_tablespace{datid=\"1\",datname=\"template1\",server=\"/var/run/postgresql:5432\"} 0\npg_stat_database_conflicts_confl_tablespace{datid=\"16389\",datname=\"app_db\",server=\"/var/run/postgresql:5432\"} 0\npg_stat_database_conflicts_confl_tablespace{datid=\"4\",datname=\"template0\",server=\"/var/run/postgresql:5432\"} 0\npg_stat_database_conflicts_confl_tablespace{datid=\"5\",datname=\"postgres\",server=\"/var/run/postgresql:5432\"} 0\n# HELP pg_stat_database_deadlocks Number of deadlocks detected in this database\n# TYPE pg_stat_database_deadlocks counter\npg_stat_database_deadlocks{datid=\"1\",datname=\"template1\"} 0\npg_stat_database_deadlocks{datid=\"16389\",datname=\"app_db\"} 0\npg_stat_database_deadlocks{datid=\"4\",datname=\"template0\"} 0\npg_stat_database_deadlocks{datid=\"5\",datname=\"postgres\"} 0\n# HELP pg_stat_database_numbackends Number of backends currently connected to this database. This is the only column in this view that returns a value reflecting current state; all other columns return the accumulated values since the last reset.\n# TYPE pg_stat_database_numbackends gauge\npg_stat_database_numbackends{datid=\"1\",datname=\"template1\"} 0\npg_stat_database_numbackends{datid=\"16389\",datname=\"app_db\"} 0\npg_stat_database_numbackends{datid=\"4\",datname=\"template0\"} 0\npg_stat_database_numbackends{datid=\"5\",datname=\"postgres\"} 2\n# HELP pg_stat_database_stats_reset Time at which these statistics were last reset\n# TYPE pg_stat_database_stats_reset counter\npg_stat_database_stats_reset{datid=\"1\",datname=\"template1\"} 0\npg_stat_database_stats_reset{datid=\"16389\",datname=\"app_db\"} 0\npg_stat_database_stats_reset{datid=\"4\",datname=\"template0\"} 0\npg_stat_database_stats_reset{datid=\"5\",datname=\"postgres\"} 0\n# HELP pg_stat_database_temp_bytes Total amount of data written to temporary files by queries in this database. All temporary files are counted, regardless of why the temporary file was created, and regardless of the log_temp_files setting.\n# TYPE pg_stat_database_temp_bytes counter\npg_stat_database_temp_bytes{datid=\"1\",datname=\"template1\"} 0\npg_stat_database_temp_bytes{datid=\"16389\",datname=\"app_db\"} 0\npg_stat_database_temp_bytes{datid=\"4\",datname=\"template0\"} 0\npg_stat_database_temp_bytes{datid=\"5\",datname=\"postgres\"} 0\n# HELP pg_stat_database_temp_files Number of temporary files created by queries in this database. All temporary files are counted, regardless of why the temporary file was created (e.g., sorting or hashing), and regardless of the log_temp_files setting.\n# TYPE pg_stat_database_temp_files counter\npg_stat_database_temp_files{datid=\"1\",datname=\"template1\"} 0\npg_stat_database_temp_files{datid=\"16389\",datname=\"app_db\"} 0\npg_stat_database_temp_files{datid=\"4\",datname=\"template0\"} 0\npg_stat_database_temp_files{datid=\"5\",datname=\"postgres\"} 0\n# HELP pg_stat_database_tup_deleted Number of rows deleted by queries in this database\n# TYPE pg_stat_database_tup_deleted counter\npg_stat_database_tup_deleted{datid=\"1\",datname=\"template1\"} 34\npg_stat_database_tup_deleted{datid=\"16389\",datname=\"app_db\"} 0\npg_stat_database_tup_deleted{datid=\"4\",datname=\"template0\"} 0\npg_stat_database_tup_deleted{datid=\"5\",datname=\"postgres\"} 0\n# HELP pg_stat_database_tup_fetched Number of rows fetched by queries in this database\n# TYPE pg_stat_database_tup_fetched counter\npg_stat_database_tup_fetched{datid=\"1\",datname=\"template1\"} 30526\npg_stat_database_tup_fetched{datid=\"16389\",datname=\"app_db\"} 0\npg_stat_database_tup_fetched{datid=\"4\",datname=\"template0\"} 0\npg_stat_database_tup_fetched{datid=\"5\",datname=\"postgres\"} 6325\n# HELP pg_stat_database_tup_inserted Number of rows inserted by queries in this database\n# TYPE pg_stat_database_tup_inserted counter\npg_stat_database_tup_inserted{datid=\"1\",datname=\"template1\"} 17704\npg_stat_database_tup_inserted{datid=\"16389\",datname=\"app_db\"} 0\npg_stat_database_tup_inserted{datid=\"4\",datname=\"template0\"} 0\npg_stat_database_tup_inserted{datid=\"5\",datname=\"postgres\"} 0\n# HELP pg_stat_database_tup_returned Number of rows returned by queries in this database\n# TYPE pg_stat_database_tup_returned counter\npg_stat_database_tup_returned{datid=\"1\",datname=\"template1\"} 139358\npg_stat_database_tup_returned{datid=\"16389\",datname=\"app_db\"} 0\npg_stat_database_tup_returned{datid=\"4\",datname=\"template0\"} 0\npg_stat_database_tup_returned{datid=\"5\",datname=\"postgres\"} 63731\n# HELP pg_stat_database_tup_updated Number of rows updated by queries in this database\n# TYPE pg_stat_database_tup_updated counter\npg_stat_database_tup_updated{datid=\"1\",datname=\"template1\"} 754\npg_stat_database_tup_updated{datid=\"16389\",datname=\"app_db\"} 0\npg_stat_database_tup_updated{datid=\"4\",datname=\"template0\"} 0\npg_stat_database_tup_updated{datid=\"5\",datname=\"postgres\"} 0\n# HELP pg_stat_database_xact_commit Number of transactions in this database that have been committed\n# TYPE pg_stat_database_xact_commit counter\npg_stat_database_xact_commit{datid=\"1\",datname=\"template1\"} 1051\npg_stat_database_xact_commit{datid=\"16389\",datname=\"app_db\"} 0\npg_stat_database_xact_commit{datid=\"4\",datname=\"template0\"} 0\npg_stat_database_xact_commit{datid=\"5\",datname=\"postgres\"} 185\n# HELP pg_stat_database_xact_rollback Number of transactions in this database that have been rolled back\n# TYPE pg_stat_database_xact_rollback counter\npg_stat_database_xact_rollback{datid=\"1\",datname=\"template1\"} 0\npg_stat_database_xact_rollback{datid=\"16389\",datname=\"app_db\"} 0\npg_stat_database_xact_rollback{datid=\"4\",datname=\"template0\"} 0\npg_stat_database_xact_rollback{datid=\"5\",datname=\"postgres\"} 0\n# HELP pg_static Version string as reported by postgres\n# TYPE pg_static untyped\npg_static{server=\"/var/run/postgresql:5432\",short_version=\"16.15.0\",version=\"PostgreSQL 16.15 (Ubuntu 16.15-0ubuntu0.24.04.1) on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit\"} 1\n# HELP pg_up Whether the last scrape of metrics from PostgreSQL was able to connect to the server (1 for yes, 0 for no).\n# TYPE pg_up gauge\npg_up 1\n# HELP pg_wal_segments Number of WAL segments\n# TYPE pg_wal_segments gauge\npg_wal_segments 1\n# HELP pg_wal_size_bytes Total size of WAL segments\n# TYPE pg_wal_size_bytes gauge\npg_wal_size_bytes 1.6777216e+07\n# HELP postgres_exporter_build_info A metric with a constant '1' value labeled by version, revision, branch, goversion from which postgres_exporter wasbuilt, and the goos and goarch for the build.\n# TYPE postgres_exporter_build_info gauge\npostgres_exporter_build_info{branch=\"HEAD\",goarch=\"amd64\",goos=\"linux\",goversion=\"go1.26.4\",revision=\"867fbcac31cd18c143e244190ea9168cca069827\",tags=\"unknown\",version=\"0.20.1\"} 1\n# HELP postgres_exporter_config_last_reload_success_timestamp_seconds Timestamp of the last successful configuration reload.\n# TYPE postgres_exporter_config_last_reload_success_timestamp_seconds gauge\npostgres_exporter_config_last_reload_success_timestamp_seconds 0\n# HELP postgres_exporter_config_last_reload_successful Postgres exporter config loaded successfully.\n# TYPE postgres_exporter_config_last_reload_successful gauge\npostgres_exporter_config_last_reload_successful 0\n# HELP process_cpu_seconds_total Total user and system CPU time spent in seconds.\n# TYPE process_cpu_seconds_total counter\nprocess_cpu_seconds_total 0\n# HELP process_max_fds Maximum number of open file descriptors.\n# TYPE process_max_fds gauge\nprocess_max_fds 524287\n# HELP process_network_receive_bytes_total Number of bytes received by the process over the network.\n# TYPE process_network_receive_bytes_total counter\nprocess_network_receive_bytes_total 7.6614349e+07\n# HELP process_network_transmit_bytes_total Number of bytes sent by the process over the network.\n# TYPE process_network_transmit_bytes_total counter\nprocess_network_transmit_bytes_total 1.572503e+06\n# HELP process_open_fds Number of open file descriptors.\n# TYPE process_open_fds gauge\nprocess_open_fds 9\n# HELP process_resident_memory_bytes Resident memory size in bytes.\n# TYPE process_resident_memory_bytes gauge\nprocess_resident_memory_bytes 1.3893632e+07\n# HELP process_start_time_seconds Start time of the process since unix epoch in seconds.\n# TYPE process_start_time_seconds gauge\nprocess_start_time_seconds 1.7929202966e+09\n# HELP process_virtual_memory_bytes Virtual memory size in bytes.\n# TYPE process_virtual_memory_bytes gauge\nprocess_virtual_memory_bytes 1.30297856e+09\n# HELP process_virtual_memory_max_bytes Maximum amount of virtual memory available in bytes.\n# TYPE process_virtual_memory_max_bytes gauge\nprocess_virtual_memory_max_bytes 1.8446744073709552e+19\n# HELP promhttp_metric_handler_requests_in_flight Current numberof scrapes being served.\n# TYPE promhttp_metric_handler_requests_in_flight gauge\npromhttp_metric_handler_requests_in_flight 1\n# HELP promhttp_metric_handler_requests_total Total number of scrapes by HTTP status code.\n# TYPE promhttp_metric_handler_requests_total counter\npromhttp_metric_handler_requests_total{code=\"200\"} 0\npromhttp_metric_handler_requests_total{code=\"500\"} 0\npromhttp_metric_handler_requests_total{code=\"503\"} 0\n",
+tadzhnahal@pc ~/projects/ansible$ ansible-playbook -i inventories/main/hosts.yaml playbook.yml --ask-vault-pass
+Vault password:
+
+PLAY [Configure PostgreSQL] *****************************************************************************************************************************************
+
+TASK [Gathering Facts] **********************************************************************************************************************************************
+[WARNING]: Platform linux on host vm1 is using the discovered Python interpreter at /usr/bin/python3.12, but future installation of another Python interpreter could
+change the meaning of that path. See https://docs.ansible.com/ansible-core/2.18/reference_appendices/interpreter_discovery.html for more information.
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL common tools] *******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Disable automatic PostgreSQL cluster creation] *****************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL] ********************************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL data directory] ******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Initialize PostgreSQL cluster] *********************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL systemd service] ****************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Start PostgreSQL service] **************************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Configure PostgreSQL settings] *********************************************************************************************************************
+ok: [vm1] => (item={'key': 'max_connections', 'value': 100})
+ok: [vm1] => (item={'key': 'shared_buffers', 'value': '128MB'})
+ok: [vm1] => (item={'key': 'log_min_duration_statement', 'value': 1000})
+
+TASK [postgres : Configure PostgreSQL access rules] *****************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Check PostgreSQL connection] ***********************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL users] ***************************************************************************************************************************
+ok: [vm1] => (item=None)
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL databases] ***********************************************************************************************************************
+ok: [vm1] => (item={'name': 'app_db'})
+
+TASK [postgres : Create exporter system user] ***********************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create exporter PostgreSQL user] *******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Grant monitoring permissions to exporter] **********************************************************************************************************
+[DEPRECATION WARNING]: Param 'groups' is deprecated. See the module docs for more information. This feature will be removed from community.postgresql in version
+6.0.0. Deprecation warnings can be disabled by setting deprecation_warnings=False in ansible.cfg.
+ok: [vm1]
+
+TASK [postgres : Download postgres-exporter] ************************************************************************************************************************
+ok: [vm1 -> localhost]
+
+TASK [postgres : Extract postgres-exporter] *************************************************************************************************************************
+skipping: [vm1]
+
+TASK [postgres : Install postgres-exporter binary] ******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Install postgres-exporter service] *****************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Start postgres-exporter service] *******************************************************************************************************************
+ok: [vm1]
+
+PLAY RECAP **********************************************************************************************************************************************************
+vm1                        : ok=20   changed=0    unreachable=0    failed=0    skipped=1    rescued=0    ignored=0
+
+tadzhnahal@pc ~/projects/ansible$ mv playbook.yml postgres.play.yml
+tadzhnahal@pc ~/projects/ansible$ ls -l postgres.play.yml
+.rw-r--r--@ 86 tadzhnahal 25 окт 11:09 postgres.play.yml
+tadzhnahal@pc ~/projects/ansible$ nano ansible.cfg
+tadzhnahal@pc ~/projects/ansible$ cat ansible.cfg
+[defaults]
+inventory = inventories/main/hosts.yaml
+roles_path = roles
+tadzhnahal@pc ~/projects/ansible$ ansible-config dump --only-changed
+CONFIG_FILE() = /home/tadzhnahal/projects/ansible/ansible.cfg
+DEFAULT_HOST_LIST(/home/tadzhnahal/projects/ansible/ansible.cfg) = ['/home/tadzhnahal/projects/ansible/inventories/main/hosts.yaml']
+DEFAULT_ROLES_PATH(/home/tadzhnahal/projects/ansible/ansible.cfg) = ['/home/tadzhnahal/projects/ansible/roles']
+EDITOR(env: EDITOR) = /usr/bin/nano
+
+GALAXY_SERVERS:
+tadzhnahal@pc ~/projects/ansible$ tree -a -I '.git'
+.
+├── inventories
+│   └── main
+│       ├── group_vars
+│       │   └── all
+│       │       └── vault.yml
+│       └── hosts.yaml
+├── roles
+│   └── postgres
+│       ├── defaults
+│       │   └── main.yml
+│       ├── handlers
+│       │   └── main.yml
+│       ├── tasks
+│       │   └── main.yml
+│       └── templates
+│           ├── pg_hba.conf.j2
+│           ├── postgres-exporter.service.j2
+│           └── postgresql-custom.service.j2
+├── ansible.cfg
+├── postgres.play.yml
+└── requirements.yml
+tadzhnahal@pc ~/projects/ansible$ ansible vm1 -b --ask-vault-pass -m command -a 'stat -c "%U:%G %a %n" /data /data/postgres /data/postgres/data'
+Vault password:
+[WARNING]: Platform linux on host vm1 is using the discovered Python interpreter at /usr/bin/python3.12, but future installation of another Python interpreter could
+change the meaning of that path. See https://docs.ansible.com/ansible-core/2.18/reference_appendices/interpreter_discovery.html for more information.
+vm1 | CHANGED | rc=0 >>
+postgres:postgres 700 /data
+postgres:postgres 700 /data/postgres
+postgres:postgres 700 /data/postgres/data
+tadzhnahal@pc ~/projects/ansible$ nano roles/postgres/tasks/main.yml
+tadzhnahal@pc ~/projects/ansible$ sed -n '15,43p' roles/postgres/tasks/main.yml
+    line: 'create_main_cluster = false'
+
+- name: Install PostgreSQL
+  ansible.builtin.apt:
+    name: postgresql
+    state: present
+
+- name: Create /data directory
+  ansible.builtin.file:
+    path: /data
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Create PostgreSQL parent directory
+  ansible.builtin.file:
+    path: /data/postgres
+    state: directory
+    owner: postgres
+    group: postgres
+    mode: '0700'
+
+- name: Create PostgreSQL data directory
+  ansible.builtin.file:
+    path: "{{ postgres__data_dir }}"
+    state: directory
+    owner: postgres
+    group: postgres
+tadzhnahal@pc ~/projects/ansible$ ansible-playbook postgres.play.yml --ask-vault-pass
+Vault password:
+
+PLAY [Configure PostgreSQL] *****************************************************************************************************************************************
+
+TASK [Gathering Facts] **********************************************************************************************************************************************
+[WARNING]: Platform linux on host vm1 is using the discovered Python interpreter at /usr/bin/python3.12, but future installation of another Python interpreter could
+change the meaning of that path. See https://docs.ansible.com/ansible-core/2.18/reference_appendices/interpreter_discovery.html for more information.
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL common tools] *******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Disable automatic PostgreSQL cluster creation] *****************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL] ********************************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create /data directory] ****************************************************************************************************************************
+changed: [vm1]
+
+TASK [postgres : Create PostgreSQL parent directory] ****************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL data directory] ******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Initialize PostgreSQL cluster] *********************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL systemd service] ****************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Start PostgreSQL service] **************************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Configure PostgreSQL settings] *********************************************************************************************************************
+ok: [vm1] => (item={'key': 'max_connections', 'value': 100})
+ok: [vm1] => (item={'key': 'shared_buffers', 'value': '128MB'})
+ok: [vm1] => (item={'key': 'log_min_duration_statement', 'value': 1000})
+
+TASK [postgres : Configure PostgreSQL access rules] *****************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Check PostgreSQL connection] ***********************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL users] ***************************************************************************************************************************
+ok: [vm1] => (item=None)
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL databases] ***********************************************************************************************************************
+ok: [vm1] => (item={'name': 'app_db'})
+
+TASK [postgres : Create exporter system user] ***********************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create exporter PostgreSQL user] *******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Grant monitoring permissions to exporter] **********************************************************************************************************
+[DEPRECATION WARNING]: Param 'groups' is deprecated. See the module docs for more information. This feature will be removed from community.postgresql in version
+6.0.0. Deprecation warnings can be disabled by setting deprecation_warnings=False in ansible.cfg.
+ok: [vm1]
+
+TASK [postgres : Download postgres-exporter] ************************************************************************************************************************
+ok: [vm1 -> localhost]
+
+TASK [postgres : Extract postgres-exporter] *************************************************************************************************************************
+skipping: [vm1]
+
+TASK [postgres : Install postgres-exporter binary] ******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Install postgres-exporter service] *****************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Start postgres-exporter service] *******************************************************************************************************************
+ok: [vm1]
+
+PLAY RECAP **********************************************************************************************************************************************************
+vm1                        : ok=22   changed=1    unreachable=0    failed=0    skipped=1    rescued=0    ignored=0
+
+tadzhnahal@pc ~/projects/ansible$ ansible vm1 -b --ask-vault-pass -m command -a 'stat -c "%U:%G %a %n" /data /data/postgres /data/postgres/data'
+Vault password:
+[WARNING]: Platform linux on host vm1 is using the discovered Python interpreter at /usr/bin/python3.12, but future installation of another Python interpreter could
+change the meaning of that path. See https://docs.ansible.com/ansible-core/2.18/reference_appendices/interpreter_discovery.html for more information.
+vm1 | CHANGED | rc=0 >>
+root:root 755 /data
+postgres:postgres 700 /data/postgres
+postgres:postgres 700 /data/postgres/data
+tadzhnahal@pc ~/projects/ansible$ nano roles/postgres/README.md
+tadzhnahal@pc ~/projects/ansible$ nano README.md
+tadzhnahal@pc ~/projects/ansible$ ansible-galaxy collection install -r requirements.yml
+ansible-playbook postgres.play.yml            # первый прогон
+ansible-playbook postgres.play.yml            # второй прогон: changed=0
+
+ansible vm1 -b -m command -a 'systemctl is-active postgresql@... postgres-exporter'   # ваши имена служб
+ansible vm1 -b --become-user postgres -m command -a 'psql -c "SELECT 1"'
+ansible vm1 -b --become-user postgres -m command -a 'psql -c "\l"'   # созданные БД
+ansible vm1 -b --become-user postgres -m command -a 'psql -c "\du"'  # созданные пользователи
+ansible vm1 -m uri -a 'url=http://127.0.0.1:9187/metrics return_content=true' | grep 'pg_up 1'
+Starting galaxy collection install process
+Nothing to do. All requested collections are already installed. If you want to reinstall them, consider using `--force`.
+
+PLAY [Configure PostgreSQL] *****************************************************************************************************************************************
+ERROR! Attempting to decrypt but no vault secrets found
+
+PLAY [Configure PostgreSQL] *****************************************************************************************************************************************
+ERROR! Attempting to decrypt but no vault secrets found
+ERROR! Attempting to decrypt but no vault secrets found
+ERROR! Attempting to decrypt but no vault secrets found
+ERROR! Attempting to decrypt but no vault secrets found
+ERROR! Attempting to decrypt but no vault secrets found
+ERROR! Attempting to decrypt but no vault secrets found
+tadzhnahal@pc ~/projects/ansible$ ansible-playbook postgres.play.yml --ask-vault-pass
+Vault password:
+
+PLAY [Configure PostgreSQL] *****************************************************************************************************************************************
+
+TASK [Gathering Facts] **********************************************************************************************************************************************
+[WARNING]: Platform linux on host vm1 is using the discovered Python interpreter at /usr/bin/python3.12, but future installation of another Python interpreter could
+change the meaning of that path. See https://docs.ansible.com/ansible-core/2.18/reference_appendices/interpreter_discovery.html for more information.
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL common tools] *******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Disable automatic PostgreSQL cluster creation] *****************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL] ********************************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create /data directory] ****************************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL parent directory] ****************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL data directory] ******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Initialize PostgreSQL cluster] *********************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL systemd service] ****************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Start PostgreSQL service] **************************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Configure PostgreSQL settings] *********************************************************************************************************************
+ok: [vm1] => (item={'key': 'max_connections', 'value': 100})
+ok: [vm1] => (item={'key': 'shared_buffers', 'value': '128MB'})
+ok: [vm1] => (item={'key': 'log_min_duration_statement', 'value': 1000})
+
+TASK [postgres : Configure PostgreSQL access rules] *****************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Check PostgreSQL connection] ***********************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL users] ***************************************************************************************************************************
+ok: [vm1] => (item=None)
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL databases] ***********************************************************************************************************************
+ok: [vm1] => (item={'name': 'app_db'})
+
+TASK [postgres : Create exporter system user] ***********************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create exporter PostgreSQL user] *******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Grant monitoring permissions to exporter] **********************************************************************************************************
+[DEPRECATION WARNING]: Param 'groups' is deprecated. See the module docs for more information. This feature will be removed from community.postgresql in version
+6.0.0. Deprecation warnings can be disabled by setting deprecation_warnings=False in ansible.cfg.
+ok: [vm1]
+
+TASK [postgres : Download postgres-exporter] ************************************************************************************************************************
+ok: [vm1 -> localhost]
+
+TASK [postgres : Extract postgres-exporter] *************************************************************************************************************************
+skipping: [vm1]
+
+TASK [postgres : Install postgres-exporter binary] ******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Install postgres-exporter service] *****************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Start postgres-exporter service] *******************************************************************************************************************
+ok: [vm1]
+
+PLAY RECAP **********************************************************************************************************************************************************
+vm1                        : ok=22   changed=0    unreachable=0    failed=0    skipped=1    rescued=0    ignored=0
+
+tadzhnahal@pc ~/projects/ansible$ ansible-playbook postgres.play.yml --ask-vault-pass
+Vault password:
+
+PLAY [Configure PostgreSQL] *****************************************************************************************************************************************
+
+TASK [Gathering Facts] **********************************************************************************************************************************************
+[WARNING]: Platform linux on host vm1 is using the discovered Python interpreter at /usr/bin/python3.12, but future installation of another Python interpreter could
+change the meaning of that path. See https://docs.ansible.com/ansible-core/2.18/reference_appendices/interpreter_discovery.html for more information.
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL common tools] *******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Disable automatic PostgreSQL cluster creation] *****************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL] ********************************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create /data directory] ****************************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL parent directory] ****************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL data directory] ******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Initialize PostgreSQL cluster] *********************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Install PostgreSQL systemd service] ****************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Start PostgreSQL service] **************************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Configure PostgreSQL settings] *********************************************************************************************************************
+ok: [vm1] => (item={'key': 'max_connections', 'value': 100})
+ok: [vm1] => (item={'key': 'shared_buffers', 'value': '128MB'})
+ok: [vm1] => (item={'key': 'log_min_duration_statement', 'value': 1000})
+
+TASK [postgres : Configure PostgreSQL access rules] *****************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Check PostgreSQL connection] ***********************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL users] ***************************************************************************************************************************
+ok: [vm1] => (item=None)
+ok: [vm1]
+
+TASK [postgres : Create PostgreSQL databases] ***********************************************************************************************************************
+ok: [vm1] => (item={'name': 'app_db'})
+
+TASK [postgres : Create exporter system user] ***********************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Create exporter PostgreSQL user] *******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Grant monitoring permissions to exporter] **********************************************************************************************************
+[DEPRECATION WARNING]: Param 'groups' is deprecated. See the module docs for more information. This feature will be removed from community.postgresql in version
+6.0.0. Deprecation warnings can be disabled by setting deprecation_warnings=False in ansible.cfg.
+ok: [vm1]
+
+TASK [postgres : Download postgres-exporter] ************************************************************************************************************************
+ok: [vm1 -> localhost]
+
+TASK [postgres : Extract postgres-exporter] *************************************************************************************************************************
+skipping: [vm1]
+
+TASK [postgres : Install postgres-exporter binary] ******************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Install postgres-exporter service] *****************************************************************************************************************
+ok: [vm1]
+
+TASK [postgres : Start postgres-exporter service] *******************************************************************************************************************
+ok: [vm1]
+
+PLAY RECAP **********************************************************************************************************************************************************
+vm1                        : ok=22   changed=0    unreachable=0    failed=0    skipped=1    rescued=0    ignored=0
+
+tadzhnahal@pc ~/projects/ansible$ ansible vm1 -b --ask-vault-pass -m command -a 'systemctl is-active postgresql-custom postgres-exporter'
+Vault password:
+[WARNING]: Platform linux on host vm1 is using the discovered Python interpreter at /usr/bin/python3.12, but future installation of another Python interpreter could
+change the meaning of that path. See https://docs.ansible.com/ansible-core/2.18/reference_appendices/interpreter_discovery.html for more information.
+vm1 | CHANGED | rc=0 >>
+active
+active
+tadzhnahal@pc ~/projects/ansible$ ansible vm1 -b --ask-vault-pass --become-user postgres -m command -a 'psql -c "SELECT 1"'
+Vault password:
+[WARNING]: Platform linux on host vm1 is using the discovered Python interpreter at /usr/bin/python3.12, but future installation of another Python interpreter could
+change the meaning of that path. See https://docs.ansible.com/ansible-core/2.18/reference_appendices/interpreter_discovery.html for more information.
+vm1 | CHANGED | rc=0 >>
+ ?column?
+----------
+        1
+(1 row)
+tadzhnahal@pc ~/projects/ansible$ ansible vm1 -b --ask-vault-pass --become-user postgres -m command -a 'psql -c "\l"'
+Vault password:
+[WARNING]: Platform linux on host vm1 is using the discovered Python interpreter at /usr/bin/python3.12, but future installation of another Python interpreter could
+change the meaning of that path. See https://docs.ansible.com/ansible-core/2.18/reference_appendices/interpreter_discovery.html for more information.
+vm1 | CHANGED | rc=0 >>
+                                                       List of databases
+   Name    |  Owner   | Encoding | Locale Provider |   Collate   |    Ctype    | ICU Locale | ICU Rules |   Access privileges
+-----------+----------+----------+-----------------+-------------+-------------+------------+-----------+-----------------------
+ app_db    | postgres | UTF8     | libc            | en_US.UTF-8 | en_US.UTF-8 |            |           |
+ postgres  | postgres | UTF8     | libc            | en_US.UTF-8 | en_US.UTF-8 |            |           |
+ template0 | postgres | UTF8     | libc            | en_US.UTF-8 | en_US.UTF-8 |            |           | =c/postgres          +
+           |          |          |                 |             |             |            |           | postgres=CTc/postgres
+ template1 | postgres | UTF8     | libc            | en_US.UTF-8 | en_US.UTF-8 |            |           | =c/postgres          +
+           |          |          |                 |             |             |            |           | postgres=CTc/postgres
+(4 rows)
+tadzhnahal@pc ~/projects/ansible$ ansible vm1 -b --ask-vault-pass --become-user postgres -m command -a 'psql -c "\du"'
+Vault password:
+[WARNING]: Platform linux on host vm1 is using the discovered Python interpreter at /usr/bin/python3.12, but future installation of another Python interpreter could
+change the meaning of that path. See https://docs.ansible.com/ansible-core/2.18/reference_appendices/interpreter_discovery.html for more information.
+vm1 | CHANGED | rc=0 >>
+                                 List of roles
+     Role name     |                         Attributes
+-------------------+------------------------------------------------------------
+ app_user          |
+ postgres          | Superuser, Create role, Create DB, Replication, Bypass RLS
+ postgres_exporter |
+tadzhnahal@pc ~/projects/ansible$ ansible vm1 --ask-vault-pass -m uri -a 'url=http://127.0.0.1:9187/metrics return_content=true' | grep -o 'pg_up 1'
+Vault password:
+[WARNING]: Platform linux on host vm1 is using the discovered Python
+interpreter at /usr/bin/python3.12, but future installation of another Python
+interpreter could change the meaning of that path. See
+https://docs.ansible.com/ansible-
+core/2.18/reference_appendices/interpreter_discovery.html for more information.
+pg_up 1
+tadzhnahal@pc ~/projects/ansible$

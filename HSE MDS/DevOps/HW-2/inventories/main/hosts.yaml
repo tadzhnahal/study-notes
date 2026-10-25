@@ -1,0 +1,6 @@
+all:
+  hosts:
+    vm1:
+      ansible_host: 192.168.122.127
+      ansible_user: ans-user
+      ansible_ssh_private_key_file: /home/tadzhnahal/.ssh/id_ans_user
